@@ -1,6 +1,4 @@
-import json
 from enum import StrEnum
-from pathlib import Path
 from typing import Tuple
 
 import dash_bootstrap_components as dbc
@@ -11,8 +9,7 @@ from dash import Dash, Input, Output, dcc, html
 from plotly.subplots import make_subplots
 
 from dashboard.data_handling.transaction_data import load_and_process_data_group_stocks
-
-STOCK_METADATA_PATH = Path(__file__).parents[3] / "data" / "stock_metadata.json"
+from file_paths import STOCK_METADATA
 
 
 class AnalysisType(StrEnum):
@@ -38,9 +35,6 @@ COMPOSITION_MODES = [
     {"label": "Region", "value": AnalysisType.REGION},
     {"label": "Provider", "value": AnalysisType.PROVIDER},
 ]
-
-with open(STOCK_METADATA_PATH, "r") as f:
-    STOCK_METADATA: dict[str, dict[str, str]] = json.load(f)
 
 
 def fetch_portfolio_data(selected_date: str, selection: str, mode: str) -> Tuple[pd.DataFrame, str]:

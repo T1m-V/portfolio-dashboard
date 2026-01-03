@@ -1,12 +1,6 @@
-import json
-from pathlib import Path
-
 import pandas as pd
 
-# Paths (keep these as you had them)
-SNAPSHOT_PATH = Path(__file__).parents[3] / "data" / "transactions" / "portfolio_snapshot.csv"
-PRICE_FOLDER_PATH = Path(__file__).parents[3] / "data" / "prices"
-STOCK_METADATA_PATH = Path(__file__).parents[3] / "data" / "stock_metadata.json"
+from file_paths import PRICE_DATA_FOLDER, SNAPSHOT_FILE_PATH, STOCK_METADATA
 
 COLS_TO_FILL = [
     "Quantity",
@@ -15,11 +9,6 @@ COLS_TO_FILL = [
     "Cumulative Taxes",
     "Gross Dividends",
 ]
-
-
-def _load_stock_metadata() -> dict[str, dict[str, str]]:
-    with open(STOCK_METADATA_PATH, "r") as f:
-        return json.load(f)
 
 
 def _process_price_history(
@@ -34,9 +23,9 @@ def _process_price_history(
 
     df_prices = df_prices.set_index("Date")
     full_range = pd.date_range(start=df_prices.index.min(), end=end_dt, freq="D")
-    currency = _load_stock_metadata().get(isin, {}).get("currency", "EUR")
+    currency = STOCK_METADATA.get(isin, {}).get("currency", "EUR")
     if currency != "EUR":
-        fx_path = PRICE_FOLDER_PATH / f"{currency}_EUR.csv"
+        fx_path = PRICE_DATA_FOLDER / f"{currency}_EUR.csv"
         if not fx_path.exists():
             error_msg = f"⚠️ Warning: No forex data for {currency}. Defaulting to 1.0"
             raise FileNotFoundError(error_msg)
@@ -60,7 +49,7 @@ def _process_price_history(
 
 def _finalize_calculations(df: pd.DataFrame) -> pd.DataFrame:
     """Internal helper to apply name mapping and financial calculations."""
-    stock_metadata = _load_stock_metadata()
+    stock_metadata = STOCK_METADATA
     name_lookup = {isin: info["name"] for isin, info in stock_metadata.items()}
     df["Asset Name"] = df["ISIN"].map(name_lookup).fillna(df["ISIN"])
     df["Market Value"] = df["Quantity"] * df["Price"]
@@ -74,13 +63,13 @@ def load_and_process_data_group_stocks(
 
     # 1. Resolve File Paths
     if isins:
-        file_paths = [PRICE_FOLDER_PATH / f"{isin}.csv" for isin in isins]
+        file_paths = [PRICE_DATA_FOLDER / f"{isin}.csv" for isin in isins]
         # Check if files exist; raise error if any are missing
         for p in file_paths:
             if not p.exists():
                 raise FileNotFoundError(f"Price file not found for ISIN: {p.stem}")
     else:
-        file_paths = list(PRICE_FOLDER_PATH.glob("*.csv"))
+        file_paths = list(PRICE_DATA_FOLDER.glob("*.csv"))
 
     # 2. Bulk Price Loading
     price_frames = []
@@ -96,7 +85,7 @@ def load_and_process_data_group_stocks(
     df_prices = pd.concat(price_frames, ignore_index=True)
 
     # 3. Bulk Portfolio Loading & Filtering
-    df_port = pd.read_csv(SNAPSHOT_PATH)
+    df_port = pd.read_csv(SNAPSHOT_FILE_PATH)
     df_port["Date"] = pd.to_datetime(df_port["Date"])
     df_port = df_port[df_port["Date"] <= end_dt]
 
