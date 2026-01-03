@@ -17,6 +17,11 @@ COLS_TO_FILL = [
 ]
 
 
+def _load_stock_metadata() -> dict[str, dict[str, str]]:
+    with open(STOCK_METADATA_PATH, "r") as f:
+        return json.load(f)
+
+
 def _process_price_history(
     df_prices: pd.DataFrame, isin: str, end_dt: pd.Timestamp
 ) -> pd.DataFrame:
@@ -29,15 +34,28 @@ def _process_price_history(
 
     df_prices = df_prices.set_index("Date")
     full_range = pd.date_range(start=df_prices.index.min(), end=end_dt, freq="D")
+    currency = _load_stock_metadata().get(isin, {}).get("currency", "EUR")
+    if currency != "EUR":
+        fx_path = PRICE_FOLDER_PATH / f"{currency}_EUR.csv"
+        if not fx_path.exists():
+            error_msg = f"⚠️ Warning: No forex data for {currency}. Defaulting to 1.0"
+            raise FileNotFoundError(error_msg)
+        df_forex = pd.read_csv(fx_path)
+        df_forex["Date"] = pd.to_datetime(df_forex["Date"])
+        df_forex = df_forex.rename(columns={"Price": "FX_Rate"})
+
+        # Merge FX into the prices dataframe
+        df_prices = pd.merge(df_prices, df_forex[["Date", "FX_Rate"]], on="Date", how="left")
+
+        # Multiply and clean up
+        df_prices["Price"] = df_prices["Price"] * df_prices["FX_Rate"]
+        df_prices = df_prices.drop(columns=["FX_Rate"]).set_index("Date")
+
     df_prices = df_prices.reindex(full_range).ffill().reset_index()
     df_prices = df_prices.rename(columns={"index": "Date"})
     df_prices["ISIN"] = isin
+
     return df_prices[["Date", "ISIN", "Price"]]
-
-
-def _load_stock_metadata() -> dict:
-    with open(STOCK_METADATA_PATH, "r") as f:
-        return json.load(f)
 
 
 def _finalize_calculations(df: pd.DataFrame) -> pd.DataFrame:
