@@ -6,7 +6,7 @@ import pandas as pd
 # Paths (keep these as you had them)
 SNAPSHOT_PATH = Path(__file__).parents[3] / "data" / "transactions" / "portfolio_snapshot.csv"
 PRICE_FOLDER_PATH = Path(__file__).parents[3] / "data" / "prices"
-TICKER_MAP_PATH = Path(__file__).parents[3] / "data" / "ticker_map.json"
+STOCK_METADATA_PATH = Path(__file__).parents[3] / "data" / "stock_metadata.json"
 
 COLS_TO_FILL = [
     "Quantity",
@@ -35,15 +35,15 @@ def _process_price_history(
     return df_prices[["Date", "ISIN", "Price"]]
 
 
-def _load_ticker_map() -> dict:
-    with open(TICKER_MAP_PATH, "r") as f:
+def _load_stock_metadata() -> dict:
+    with open(STOCK_METADATA_PATH, "r") as f:
         return json.load(f)
 
 
 def _finalize_calculations(df: pd.DataFrame) -> pd.DataFrame:
     """Internal helper to apply name mapping and financial calculations."""
-    ticker_map = _load_ticker_map()
-    name_lookup = {isin: info["name"] for isin, info in ticker_map.items()}
+    stock_metadata = _load_stock_metadata()
+    name_lookup = {isin: info["name"] for isin, info in stock_metadata.items()}
     df["Asset Name"] = df["ISIN"].map(name_lookup).fillna(df["ISIN"])
     df["Market Value"] = df["Quantity"] * df["Price"]
     return df

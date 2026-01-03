@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 
 from dashboard.data_handling.transaction_data import load_and_process_data_group_stocks
 
-TICKER_MAP_PATH = Path(__file__).parents[3] / "data" / "ticker_map.json"
+STOCK_METADATA_PATH = Path(__file__).parents[3] / "data" / "stock_metadata.json"
 
 
 class AnalysisType(StrEnum):
@@ -39,8 +39,8 @@ COMPOSITION_MODES = [
     {"label": "Provider", "value": AnalysisType.PROVIDER},
 ]
 
-with open(TICKER_MAP_PATH, "r") as f:
-    TICKER_MAP: dict[str, dict[str, str]] = json.load(f)
+with open(STOCK_METADATA_PATH, "r") as f:
+    STOCK_METADATA: dict[str, dict[str, str]] = json.load(f)
 
 
 def fetch_portfolio_data(selected_date: str, selection: str, mode: str) -> Tuple[pd.DataFrame, str]:
@@ -54,11 +54,13 @@ def fetch_portfolio_data(selected_date: str, selection: str, mode: str) -> Tuple
 
     elif mode == AnalysisType.NAME:
         df = load_and_process_data_group_stocks(end_date_str=selected_date, isins=[selection])
-        title = TICKER_MAP.get(selection, {}).get("name", selection)
+        title = STOCK_METADATA.get(selection, {}).get("name", selection)
         return df, title
 
     else:
-        isins_in_group = [isin for isin, info in TICKER_MAP.items() if info.get(mode) == selection]
+        isins_in_group = [
+            isin for isin, info in STOCK_METADATA.items() if info.get(mode) == selection
+        ]
         df = load_and_process_data_group_stocks(end_date_str=selected_date, isins=isins_in_group)
         return df, f"Group: {selection}"
 
@@ -73,7 +75,7 @@ def create_pie_chart(df: pd.DataFrame, mode: str, comp_mode: str, selection: str
 
     # --- Case A: Individual Asset (Show Metadata Table) ---
     if mode == AnalysisType.NAME:
-        info = TICKER_MAP.get(selection, {})
+        info = STOCK_METADATA.get(selection, {})
         rows = [
             html.Tr([html.Td("Ticker", className="fw-bold"), html.Td(info.get("ticker", "-"))]),
             html.Tr([html.Td("ISIN", className="fw-bold"), html.Td(selection)]),
@@ -99,7 +101,7 @@ def create_pie_chart(df: pd.DataFrame, mode: str, comp_mode: str, selection: str
     if comp_mode not in active_holdings.columns:
         if "ISIN" in active_holdings.columns:
             active_holdings[comp_mode] = active_holdings["ISIN"].map(
-                lambda x: TICKER_MAP.get(x, {}).get(comp_mode, "Unknown")
+                lambda x: STOCK_METADATA.get(x, {}).get(comp_mode, "Unknown")
             )
 
     fig = px.pie(
@@ -320,14 +322,14 @@ def register_stock_dashboard_callbacks(app: Dash):
         elif mode == AnalysisType.NAME:
             options = [
                 {"label": info.get("name", isin), "value": isin}
-                for isin, info in TICKER_MAP.items()
+                for isin, info in STOCK_METADATA.items()
             ]
             first_val = options[0]["value"] if options else None
             return options, first_val, False, [], None
 
         else:
             groups = sorted(
-                list(set(info.get(mode) for info in TICKER_MAP.values() if info.get(mode)))
+                list(set(info.get(mode) for info in STOCK_METADATA.values() if info.get(mode)))
             )
             options = [{"label": g, "value": g} for g in groups]
             first_val = options[0]["value"] if options else None
