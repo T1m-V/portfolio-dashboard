@@ -37,7 +37,7 @@ app.layout = dbc.Container(
                         ),
                     ],
                     xs=12,
-                    md=3,
+                    md=2,
                     className="mb-3",
                 ),
                 dbc.Col(
@@ -51,12 +51,12 @@ app.layout = dbc.Container(
                         ),
                     ],
                     xs=12,
-                    md=3,
+                    md=5,
                     className="mb-3",
                 ),
                 dbc.Col(
                     [
-                        html.Label("Specific Selection:", className="fw-bold"),
+                        html.Label("Selection:", className="fw-bold"),
                         dcc.Dropdown(
                             id="asset-selector",
                             placeholder="Select...",
@@ -64,21 +64,7 @@ app.layout = dbc.Container(
                         ),
                     ],
                     xs=12,
-                    md=3,
-                    className="mb-3",
-                ),
-                dbc.Col(
-                    [
-                        html.Label("Composition By:", className="fw-bold"),
-                        dcc.Dropdown(
-                            id="composition-mode",
-                            options=COMPOSITION_MODES,
-                            value="Asset Name",
-                            clearable=False,
-                        ),
-                    ],
-                    xs=12,
-                    md=3,
+                    md=5,
                     className="mb-3",
                 ),
             ],
@@ -96,7 +82,7 @@ app.layout = dbc.Container(
         # --- Charts ---
         dbc.Row(
             [
-                # Pie Chart
+                # Left Column: Pie Chart OR Metadata Table
                 dbc.Col(
                     dbc.Card(
                         [
@@ -104,16 +90,36 @@ app.layout = dbc.Container(
                                 "Portfolio Details", className="fw-bold", id="details-card-header"
                             ),
                             dbc.CardBody(
-                                id="portfolio-pie-container",
+                                [
+                                    # Wrapper for the dropdown so we can hide/show it
+                                    html.Div(
+                                        [
+                                            html.Label(
+                                                "Portfolio Composition By:", className="fw-bold"
+                                            ),
+                                            dcc.Dropdown(
+                                                id="composition-mode",
+                                                options=COMPOSITION_MODES,
+                                                value="Asset Name",
+                                                clearable=False,
+                                            ),
+                                            html.Br(),
+                                        ],
+                                        id="composition-selector-wrapper",
+                                    ),
+                                    # This Div will hold either the dcc.Graph or the Metadata Table
+                                    html.Div(id="portfolio-pie-container"),
+                                ],
+                                className="d-flex flex-column",
                             ),
                         ],
                         className="shadow-sm h-100",
                     ),
                     xs=12,
-                    lg=4,
+                    lg=6,
                     className="mb-4",
                 ),
-                # Line Chart
+                # Right Column: Line Chart
                 dbc.Col(
                     dbc.Card(
                         [
@@ -125,7 +131,7 @@ app.layout = dbc.Container(
                         className="shadow-sm h-100",
                     ),
                     xs=12,
-                    lg=8,
+                    lg=6,
                     className="mb-4",
                 ),
             ]

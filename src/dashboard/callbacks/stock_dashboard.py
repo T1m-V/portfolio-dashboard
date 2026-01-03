@@ -96,7 +96,6 @@ def create_pie_chart(df: pd.DataFrame, mode: str, comp_mode: str, selection: str
         return html.Div("No active holdings to display.")
 
     # Enrich metadata for pie chart if missing
-    print(comp_mode)
     if comp_mode not in active_holdings.columns:
         if "ISIN" in active_holdings.columns:
             active_holdings[comp_mode] = active_holdings["ISIN"].map(
@@ -107,14 +106,23 @@ def create_pie_chart(df: pd.DataFrame, mode: str, comp_mode: str, selection: str
         active_holdings,
         values="Market Value",
         names=comp_mode,
-        title=f"By {str(comp_mode).title()}",
     )
     fig.update_layout(
-        margin=dict(t=30, b=0, l=0, r=0),
-        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+        autosize=True,
+        margin=dict(t=0, b=0, l=0, r=0),
+        legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.0),
     )
 
-    return dcc.Graph(figure=fig, config={"displayModeBar": False})
+    return html.Div(
+        [
+            dcc.Graph(
+                figure=fig,
+                config={"displayModeBar": False, "responsive": True},
+                style={"width": "100%"},
+            )
+        ],
+        className="w-100",
+    )
 
 
 def create_performance_line_chart(
@@ -252,6 +260,7 @@ def register_stock_dashboard_callbacks(app: Dash):
             Output("portfolio-pie-container", "children"),
             Output("value-over-time", "figure"),
             Output("summary-stats", "children"),
+            Output("composition-selector-wrapper", "style"),
         ],
         [
             Input("date-picker", "date"),
@@ -284,7 +293,10 @@ def register_stock_dashboard_callbacks(app: Dash):
             df=df_master, selected_date=selected_date, title_suffix=title_suffix
         )
 
-        return side_content, line_fig, summary_div
+        # Hide the "Composition By" dropdown if we are looking at a single asset
+        comp_style = {"display": "none"} if mode == AnalysisType.NAME else {"display": "block"}
+
+        return side_content, line_fig, summary_div, comp_style
 
     @app.callback(
         [
