@@ -9,6 +9,7 @@ from file_paths import (
     REAL_ESTATE_FOLDER,
     REAL_ESTATE_INFLOWS_FILE_NAME,
     REAL_ESTATE_MORTGAGE_GLOB,
+    REAL_ESTATE_OWNERSHIP_FILE_NAME,
     REAL_ESTATE_VALUES_FILE_NAME,
 )
 
@@ -25,6 +26,7 @@ MORTGAGE_COLUMNS = [
     "Notes",
 ]
 VALUE_COLUMNS = ["Asset", "Date", "Value", "Valuation Type", "Notes"]
+OWNERSHIP_COLUMNS = ["Scope", "Identifier", "Ownership Share", "Notes"]
 
 
 def _list_asset_folders() -> list[Path]:
@@ -155,6 +157,29 @@ def _validate_positive_numeric_columns(
     return frame
 
 
+def _validate_numeric_columns(
+    frame: pd.DataFrame, columns: list[str], file_name: str
+) -> pd.DataFrame:
+    """
+    Validates numeric columns without sign constraints.
+
+    args:
+        frame: Input data frame.
+        columns: Numeric columns.
+        file_name: Source file name used for error messages.
+
+    returns:
+        Frame with numeric columns cast to float.
+    """
+    for column in columns:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        if frame[column].isna().any():
+            error_msg = f"Invalid numeric value detected in {file_name}:{column}."
+            raise ValueError(error_msg)
+
+    return frame
+
+
 def _normalize_text_column(frame: pd.DataFrame, column: str) -> pd.DataFrame:
     """
     Coerces a column to string and strips surrounding whitespace.
@@ -187,6 +212,56 @@ def _ensure_asset_values(frame: pd.DataFrame, folder_name: str) -> pd.DataFrame:
     return frame
 
 
+def _load_ownership_config(asset_folder: Path) -> tuple[float, dict[str, float]]:
+    """
+    Loads optional ownership shares for an asset folder.
+
+    args:
+        asset_folder: Asset directory path.
+
+    returns:
+        Tuple of (asset_share, mortgage_share_by_id_lowercase).
+    """
+    file_path = asset_folder / REAL_ESTATE_OWNERSHIP_FILE_NAME
+    if not file_path.exists():
+        return 1.0, {}
+
+    frame = _load_csv(file_path=file_path, expected_columns=OWNERSHIP_COLUMNS)
+    if frame.empty:
+        return 1.0, {}
+
+    frame = _normalize_text_column(frame=frame, column="Scope")
+    frame = _normalize_text_column(frame=frame, column="Identifier")
+    frame = _normalize_text_column(frame=frame, column="Notes")
+    frame["Scope"] = frame["Scope"].str.upper()
+    frame["Ownership Share"] = pd.to_numeric(frame["Ownership Share"], errors="coerce")
+    if frame["Ownership Share"].isna().any():
+        raise ValueError(f"Invalid numeric value detected in {file_path.name}:Ownership Share.")
+    if ((frame["Ownership Share"] <= 0) | (frame["Ownership Share"] > 1)).any():
+        raise ValueError(f"Ownership Share in {file_path.name} must be in (0, 1].")
+
+    valid_scopes = {"ASSET", "MORTGAGE"}
+    if (~frame["Scope"].isin(valid_scopes)).any():
+        raise ValueError(f"Invalid Scope value in {file_path.name}. Use ASSET or MORTGAGE.")
+
+    asset_rows = frame[frame["Scope"] == "ASSET"]
+    if len(asset_rows) > 1:
+        raise ValueError(f"Only one ASSET row is allowed in {file_path.name}.")
+    asset_share = float(asset_rows.iloc[0]["Ownership Share"]) if len(asset_rows) == 1 else 1.0
+
+    mortgage_rows = frame[frame["Scope"] == "MORTGAGE"]
+    if mortgage_rows["Identifier"].eq("").any():
+        raise ValueError(f"MORTGAGE rows require a non-empty Identifier in {file_path.name}.")
+    if mortgage_rows["Identifier"].str.lower().duplicated().any():
+        raise ValueError(f"Duplicate mortgage Identifier values detected in {file_path.name}.")
+
+    mortgage_shares = {
+        row["Identifier"].strip().lower(): float(row["Ownership Share"])
+        for _, row in mortgage_rows.iterrows()
+    }
+    return asset_share, mortgage_shares
+
+
 def load_home_costs(asof_date: str | None = None) -> pd.DataFrame:
     """
     Loads and validates home costs.
@@ -201,6 +276,7 @@ def load_home_costs(asof_date: str | None = None) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
 
     for asset_folder in _list_asset_folders():
+        asset_share, _ = _load_ownership_config(asset_folder=asset_folder)
         file_path = asset_folder / REAL_ESTATE_COSTS_FILE_NAME
         if not file_path.exists():
             continue
@@ -213,6 +289,7 @@ def load_home_costs(asof_date: str | None = None) -> pd.DataFrame:
         frame = _ensure_asset_values(frame=frame, folder_name=asset_folder.name)
         frame = _normalize_text_column(frame=frame, column="Cost Type")
         frame = _normalize_text_column(frame=frame, column="Notes")
+        frame["Amount"] = frame["Amount"] * asset_share
         frame = _apply_asof_filter(frame=frame, asof_timestamp=asof_timestamp)
         if frame.empty:
             continue
@@ -238,6 +315,7 @@ def load_home_inflows(asof_date: str | None = None) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
 
     for asset_folder in _list_asset_folders():
+        asset_share, _ = _load_ownership_config(asset_folder=asset_folder)
         file_path = asset_folder / REAL_ESTATE_INFLOWS_FILE_NAME
         if not file_path.exists():
             continue
@@ -253,6 +331,7 @@ def load_home_inflows(asof_date: str | None = None) -> pd.DataFrame:
         frame = _ensure_asset_values(frame=frame, folder_name=asset_folder.name)
         frame = _normalize_text_column(frame=frame, column="Inflow Type")
         frame = _normalize_text_column(frame=frame, column="Notes")
+        frame["Amount"] = frame["Amount"] * asset_share
         frame = _apply_asof_filter(frame=frame, asof_timestamp=asof_timestamp)
         if frame.empty:
             continue
@@ -278,6 +357,7 @@ def load_home_values(asof_date: str | None = None) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
 
     for asset_folder in _list_asset_folders():
+        asset_share, _ = _load_ownership_config(asset_folder=asset_folder)
         file_path = asset_folder / REAL_ESTATE_VALUES_FILE_NAME
         if not file_path.exists():
             continue
@@ -290,6 +370,7 @@ def load_home_values(asof_date: str | None = None) -> pd.DataFrame:
         frame = _ensure_asset_values(frame=frame, folder_name=asset_folder.name)
         frame = _normalize_text_column(frame=frame, column="Valuation Type")
         frame = _normalize_text_column(frame=frame, column="Notes")
+        frame["Value"] = frame["Value"] * asset_share
         frame = _apply_asof_filter(frame=frame, asof_timestamp=asof_timestamp)
         if frame.empty:
             continue
@@ -316,11 +397,10 @@ def _validate_mortgage_frame(frame: pd.DataFrame, file_name: str) -> pd.DataFram
         raise ValueError(f"Mortgage file {file_name} cannot be empty.")
 
     frame = _validate_date_column(frame=frame, column="Date", file_name=file_name)
-    frame = _validate_positive_numeric_columns(
+    frame = _validate_numeric_columns(
         frame=frame,
         columns=["Initial Principal", "Interest Paid", "Principal Repaid"],
         file_name=file_name,
-        allow_zero=True,
     )
     frame = _normalize_text_column(frame=frame, column="Asset")
     frame = _normalize_text_column(frame=frame, column="Mortgage ID")
@@ -331,8 +411,8 @@ def _validate_mortgage_frame(frame: pd.DataFrame, file_name: str) -> pd.DataFram
     if first_row["Entry Type"] != "ORIGINATION":
         error_msg = f"Mortgage file {file_name} must start with Entry Type ORIGINATION."
         raise ValueError(error_msg)
-    if first_row["Initial Principal"] <= 0:
-        error_msg = f"First row Initial Principal must be > 0 in {file_name}."
+    if first_row["Initial Principal"] == 0:
+        error_msg = f"First row Initial Principal must be non-zero in {file_name}."
         raise ValueError(error_msg)
 
     if len(frame) > 1:
@@ -342,6 +422,13 @@ def _validate_mortgage_frame(frame: pd.DataFrame, file_name: str) -> pd.DataFram
             raise ValueError(error_msg)
         if (payment_rows["Initial Principal"] != 0).any():
             error_msg = f"PAYMENT rows must have Initial Principal = 0 in {file_name}."
+            raise ValueError(error_msg)
+        mortgage_sign = 1 if first_row["Initial Principal"] > 0 else -1
+        if ((payment_rows["Interest Paid"] * mortgage_sign) < 0).any():
+            error_msg = f"Interest Paid sign must match mortgage direction in {file_name}."
+            raise ValueError(error_msg)
+        if ((payment_rows["Principal Repaid"] * mortgage_sign) < 0).any():
+            error_msg = f"Principal Repaid sign must match mortgage direction in {file_name}."
             raise ValueError(error_msg)
 
     return frame[MORTGAGE_COLUMNS]
@@ -360,11 +447,22 @@ def load_mortgage_files(asof_date: str | None = None) -> pd.DataFrame:
     asof_timestamp = _parse_asof_date(asof_date=asof_date)
     frames: list[pd.DataFrame] = []
     for asset_folder in _list_asset_folders():
+        asset_share, mortgage_shares = _load_ownership_config(asset_folder=asset_folder)
         mortgage_files = sorted(asset_folder.glob(REAL_ESTATE_MORTGAGE_GLOB))
         for file_path in mortgage_files:
             frame = _load_csv(file_path=file_path, expected_columns=MORTGAGE_COLUMNS)
             frame = _validate_mortgage_frame(frame=frame, file_name=file_path.name)
             frame = _ensure_asset_values(frame=frame, folder_name=asset_folder.name)
+            shares = (
+                frame["Mortgage ID"]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .map(mortgage_shares)
+                .fillna(asset_share)
+            )
+            for column in ["Initial Principal", "Interest Paid", "Principal Repaid"]:
+                frame[column] = frame[column] * shares
             frame = _apply_asof_filter(frame=frame, asof_timestamp=asof_timestamp)
             if frame.empty:
                 continue
@@ -556,3 +654,7 @@ def summarize_real_estate(asof_date: str | None = None) -> pd.DataFrame:
     ]
     summary[numeric_output] = summary[numeric_output].round(2)
     return summary.sort_values(by="Asset").reset_index(drop=True)
+
+
+if __name__ == "__main__":
+    print(summarize_real_estate())

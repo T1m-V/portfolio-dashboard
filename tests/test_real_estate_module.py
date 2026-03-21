@@ -27,6 +27,7 @@ def real_estate_paths(tmp_path, monkeypatch):
     costs_path = asset_folder / "costs.csv"
     inflows_path = asset_folder / "inflows.csv"
     values_path = asset_folder / "values.csv"
+    ownership_path = asset_folder / "ownership.csv"
 
     monkeypatch.setattr(real_estate_core, "REAL_ESTATE_FOLDER", folder)
 
@@ -36,6 +37,7 @@ def real_estate_paths(tmp_path, monkeypatch):
         "costs_path": costs_path,
         "inflows_path": inflows_path,
         "values_path": values_path,
+        "ownership_path": ownership_path,
     }
 
 
@@ -245,3 +247,44 @@ def test_default_asof_date_is_today(real_estate_paths) -> None:
 
     assert summary_default.iloc[0]["Total Inflows"] == 2800
     assert summary_future.iloc[0]["Total Inflows"] == 12799
+
+
+def test_ownership_shares_are_applied(real_estate_paths) -> None:
+    _seed_valid_files(
+        asset_folder=real_estate_paths["asset_folder"],
+        costs_path=real_estate_paths["costs_path"],
+        inflows_path=real_estate_paths["inflows_path"],
+        values_path=real_estate_paths["values_path"],
+    )
+    _write_csv(
+        path=real_estate_paths["ownership_path"],
+        columns=real_estate_core.OWNERSHIP_COLUMNS,
+        rows=[
+            ["ASSET", "Donau87", 0.5, "Half ownership of the asset"],
+            ["MORTGAGE", "DONAU87_M2", 1.0, "Full ownership for mortgage 2"],
+        ],
+    )
+
+    mortgage_summary = summarize_mortgages(asof_date="2026-12-31")
+    m1 = mortgage_summary[mortgage_summary["Mortgage ID"] == "DONAU87_M1"].iloc[0]
+    m2 = mortgage_summary[mortgage_summary["Mortgage ID"] == "DONAU87_M2"].iloc[0]
+
+    assert m1["Initial Principal"] == 150000
+    assert m1["Interest Paid"] == 795
+    assert m1["Principal Repaid"] == 1000
+    assert m1["Outstanding Principal"] == 149000
+    assert m2["Initial Principal"] == 100000
+    assert m2["Interest Paid"] == 499
+    assert m2["Principal Repaid"] == 600
+    assert m2["Outstanding Principal"] == 99400
+
+    summary = summarize_real_estate(asof_date="2026-12-31")
+    row = summary.iloc[0]
+    assert row["Total Home Costs"] == 13600
+    assert row["Total Mortgage Interest"] == 1294
+    assert row["Total Mortgage Repayment"] == 1600
+    assert row["Total Inflows"] == 1400
+    assert row["Net Cash Out"] == 15094
+    assert row["Total Outstanding Mortgage"] == 248400
+    assert row["Current Property Value"] == 279000
+    assert row["Estimated Equity"] == 30600
