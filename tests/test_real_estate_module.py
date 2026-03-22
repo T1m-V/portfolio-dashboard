@@ -113,6 +113,56 @@ def test_loaders_enforce_canonical_columns(real_estate_paths) -> None:
     assert pd.api.types.is_datetime64_any_dtype(mortgages["Date"])
 
 
+@pytest.mark.parametrize(
+    ("case_name", "expected_pattern"),
+    [
+        ("invalid_asof_date", "Invalid asof_date"),
+        ("schema_mismatch", "Invalid CSV schema"),
+        ("invalid_date_value", "Invalid date value"),
+        ("invalid_numeric_sign", "must be positive"),
+    ],
+)
+def test_loader_validation_errors_parametrized(
+    real_estate_paths, case_name: str, expected_pattern: str
+) -> None:
+    if case_name == "invalid_asof_date":
+        with pytest.raises(ValueError, match=expected_pattern):
+            load_home_costs(asof_date="2026-31-12")
+        return
+
+    if case_name == "schema_mismatch":
+        _write_csv(
+            path=real_estate_paths["costs_path"],
+            columns=["Asset", "Date", "Cost Type", "Amount"],
+            rows=[["Donau87", "2026-01-01", "MAINTENANCE", 200]],
+        )
+        with pytest.raises(ValueError, match=expected_pattern):
+            load_home_costs(asof_date="2026-12-31")
+        return
+
+    if case_name == "invalid_date_value":
+        _write_csv(
+            path=real_estate_paths["inflows_path"],
+            columns=real_estate_core.INFLOW_COLUMNS,
+            rows=[["Donau87", "2026-13-01", "AVOIDED_RENT", 1400, "Invalid month"]],
+        )
+        with pytest.raises(ValueError, match=expected_pattern):
+            load_home_inflows(asof_date="2026-12-31")
+        return
+
+    if case_name == "invalid_numeric_sign":
+        _write_csv(
+            path=real_estate_paths["values_path"],
+            columns=real_estate_core.VALUE_COLUMNS,
+            rows=[["Donau87", "2026-01-01", -1, "WOZ", "Invalid value"]],
+        )
+        with pytest.raises(ValueError, match=expected_pattern):
+            load_home_values(asof_date="2026-12-31")
+        return
+
+    raise AssertionError(f"Unknown validation case: {case_name}")
+
+
 def test_mortgage_requires_origination_first(real_estate_paths) -> None:
     _write_csv(
         path=real_estate_paths["costs_path"],
@@ -188,21 +238,9 @@ def test_summarize_real_estate_net_cash_out(real_estate_paths) -> None:
     assert row["Total Mortgage Repayment"] == 2600
     assert row["Total Inflows"] == 2800
     assert row["Net Cash Out"] == 29089
+    assert row["Total Outstanding Mortgage"] == 397400
     assert row["Current Property Value"] == 558000
     assert row["Estimated Equity"] == 160600
-
-
-def test_summarize_real_estate_aggregates_multiple_mortgages(real_estate_paths) -> None:
-    _seed_valid_files(
-        asset_folder=real_estate_paths["asset_folder"],
-        costs_path=real_estate_paths["costs_path"],
-        inflows_path=real_estate_paths["inflows_path"],
-        values_path=real_estate_paths["values_path"],
-    )
-
-    summary = summarize_real_estate(asof_date="2026-12-31")
-    row = summary.iloc[0]
-    assert row["Total Outstanding Mortgage"] == 397400
 
 
 def test_asof_filters_future_rows(real_estate_paths) -> None:
@@ -288,3 +326,99 @@ def test_ownership_shares_are_applied(real_estate_paths) -> None:
     assert row["Total Outstanding Mortgage"] == 248400
     assert row["Current Property Value"] == 279000
     assert row["Estimated Equity"] == 30600
+
+
+@pytest.mark.parametrize(
+    ("ownership_rows", "expected_pattern"),
+    [
+        ([["ASSET", "Donau87", 1.2, "Out of range"]], "must be in \\(0, 1\\]"),
+        ([["INVALID", "Donau87", 0.5, "Invalid scope"]], "Use ASSET or MORTGAGE"),
+        (
+            [
+                ["MORTGAGE", "DONAU87_M2", 0.5, "Primary"],
+                ["MORTGAGE", "donau87_m2", 0.4, "Duplicate case-insensitive"],
+            ],
+            "Duplicate mortgage Identifier",
+        ),
+    ],
+)
+def test_invalid_ownership_config_raises(
+    real_estate_paths, ownership_rows: list[list[object]], expected_pattern: str
+) -> None:
+    _write_csv(
+        path=real_estate_paths["ownership_path"],
+        columns=real_estate_core.OWNERSHIP_COLUMNS,
+        rows=ownership_rows,
+    )
+
+    with pytest.raises(ValueError, match=expected_pattern):
+        load_home_costs(asof_date="2026-12-31")
+
+
+def test_mortgage_specific_ownership_override_applies(real_estate_paths) -> None:
+    _seed_valid_files(
+        asset_folder=real_estate_paths["asset_folder"],
+        costs_path=real_estate_paths["costs_path"],
+        inflows_path=real_estate_paths["inflows_path"],
+        values_path=real_estate_paths["values_path"],
+    )
+    _write_csv(
+        path=real_estate_paths["ownership_path"],
+        columns=real_estate_core.OWNERSHIP_COLUMNS,
+        rows=[["MORTGAGE", "donau87_m2", 0.5, "Half ownership for mortgage 2"]],
+    )
+
+    mortgage_summary = summarize_mortgages(asof_date="2026-12-31")
+    m1 = mortgage_summary[mortgage_summary["Mortgage ID"] == "DONAU87_M1"].iloc[0]
+    m2 = mortgage_summary[mortgage_summary["Mortgage ID"] == "DONAU87_M2"].iloc[0]
+
+    assert m1["Initial Principal"] == 300000
+    assert m1["Interest Paid"] == 1590
+    assert m1["Principal Repaid"] == 2000
+    assert m1["Outstanding Principal"] == 298000
+
+    assert m2["Initial Principal"] == 50000
+    assert m2["Interest Paid"] == pytest.approx(249.5)
+    assert m2["Principal Repaid"] == 300
+    assert m2["Outstanding Principal"] == 49700
+
+
+def test_real_estate_core_empty_outputs_are_canonical(real_estate_paths) -> None:
+    costs = load_home_costs(asof_date="2026-12-31")
+    inflows = load_home_inflows(asof_date="2026-12-31")
+    values = load_home_values(asof_date="2026-12-31")
+    mortgages = load_mortgage_files(asof_date="2026-12-31")
+    mortgage_summary = summarize_mortgages(asof_date="2026-12-31")
+    summary = summarize_real_estate(asof_date="2026-12-31")
+
+    assert costs.empty
+    assert inflows.empty
+    assert values.empty
+    assert mortgages.empty
+    assert mortgage_summary.empty
+    assert summary.empty
+
+    assert list(costs.columns) == real_estate_core.COST_COLUMNS
+    assert list(inflows.columns) == real_estate_core.INFLOW_COLUMNS
+    assert list(values.columns) == real_estate_core.VALUE_COLUMNS
+    assert list(mortgages.columns) == real_estate_core.MORTGAGE_COLUMNS
+    assert list(mortgage_summary.columns) == [
+        "Asset",
+        "Mortgage ID",
+        "Initial Principal",
+        "Interest Paid",
+        "Principal Repaid",
+        "Outstanding Principal",
+        "Cash Out",
+    ]
+    assert list(summary.columns) == [
+        "Asset",
+        "Total Home Costs",
+        "Total Mortgage Interest",
+        "Total Mortgage Repayment",
+        "Total Inflows",
+        "Net Cash Out",
+        "Total Outstanding Mortgage",
+        "Current Property Value",
+        "Estimated Equity",
+    ]
