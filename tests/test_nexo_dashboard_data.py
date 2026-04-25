@@ -5,6 +5,18 @@ import pandas as pd
 import dashboard.data_handling.nexo_data as nexo_data
 
 
+def test_missing_nexo_snapshot_file_returns_empty_dashboard_data(
+    monkeypatch, tmp_path: Path
+) -> None:
+    missing_snapshot = tmp_path / "missing_nexo_raw_snapshots.csv"
+    monkeypatch.setattr(nexo_data, "NEXO_SNAPSHOT_PATH", missing_snapshot)
+
+    result = nexo_data.load_and_process_nexo_data(end_date_str="2026-01-04")
+
+    assert result.empty
+    assert nexo_data.list_nexo_coins() == []
+
+
 def test_recent_nexo_transactions_excludes_internal_and_term_rows(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -107,6 +119,52 @@ def test_recent_nexo_transactions_coin_filter_applies_after_exclusions(
     )
 
     assert list(result["Type"]) == ["Exchange"]
+
+
+def test_recent_nexo_transactions_canonicalizes_usd_debt_bucket(
+    monkeypatch, tmp_path: Path
+) -> None:
+    pd.DataFrame(
+        [
+            {
+                "Type": "Nexo Card Purchase",
+                "Input Currency": "xUSD",
+                "Input Amount": "-10.06",
+                "Output Currency": "EUR",
+                "Output Amount": "8.75",
+                "Details": "approved / card merchant",
+                "Date / Time (UTC)": "03/01/2026 10:00",
+            },
+            {
+                "Type": "Nexo Card Refund",
+                "Input Currency": "USDX",
+                "Input Amount": "10.06",
+                "Output Currency": "EUR",
+                "Output Amount": "8.75",
+                "Details": "approved / card merchant",
+                "Date / Time (UTC)": "02/01/2026 10:00",
+            },
+            {
+                "Type": "Exchange",
+                "Input Currency": "USDT",
+                "Input Amount": "-2",
+                "Output Currency": "BTC",
+                "Output Amount": "0.00005",
+                "Details": "approved / exchange",
+                "Date / Time (UTC)": "01/01/2026 10:00",
+            },
+        ]
+    ).to_csv(tmp_path / "nexo.csv", index=False)
+
+    monkeypatch.setattr(nexo_data, "NEXO_TRANSACTIONS_FOLDER", tmp_path)
+
+    result = nexo_data.load_recent_nexo_transactions(
+        end_date_str="2026-01-04",
+        coins=["USD"],
+        limit=None,
+    )
+
+    assert list(result["Type"]) == ["Nexo Card Purchase", "Nexo Card Refund"]
 
 
 def test_recent_nexo_transactions_reads_all_csv_files_in_folder(

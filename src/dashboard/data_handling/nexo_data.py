@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from blockchain_reader.symbols import sanitize_symbol
 from file_paths import (
     BLOCKCHAIN_SNAPSHOT_FOLDER,
     BLOCKCHAIN_TRANSACTIONS_FOLDER,
@@ -20,9 +21,26 @@ EUR_STABLES = {"EUR", "EURX"}
 
 COLS_TO_FILL = ["Quantity", "Principal Invested"]
 IGNORED_NEXO_TYPES = {"locking term deposit", "unlocking term deposit"}
+SNAPSHOT_COLUMNS = ["Date", "Coin", *COLS_TO_FILL]
+
+
+def _empty_snapshot_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=SNAPSHOT_COLUMNS)
+
+
+def _canonicalize_nexo_coin(value: object) -> str:
+    coin = sanitize_symbol(value)
+    if not coin or coin == "-":
+        return ""
+    if coin.upper() in {"USD", "USDX", "XUSD"}:
+        return "USD"
+    return coin
 
 
 def _load_nexo_snapshot(end_dt: pd.Timestamp, coins: list[str] | None) -> pd.DataFrame:
+    if not NEXO_SNAPSHOT_PATH.exists():
+        return _empty_snapshot_frame()
+
     snapshots = pd.read_csv(NEXO_SNAPSHOT_PATH)
     snapshots["Date"] = pd.to_datetime(snapshots["Date"], errors="coerce")
     snapshots = snapshots.dropna(subset=["Date"])
@@ -120,6 +138,9 @@ def _build_price_frame(
 
 
 def list_nexo_coins() -> list[str]:
+    if not NEXO_SNAPSHOT_PATH.exists():
+        return []
+
     snapshots = pd.read_csv(NEXO_SNAPSHOT_PATH, usecols=["Coin"])
     coins = [coin for coin in snapshots["Coin"].dropna().unique().tolist() if str(coin).strip()]
     return sorted(coins)
@@ -201,7 +222,11 @@ def load_recent_nexo_transactions(
     frame = frame[~(type_series.isin(IGNORED_NEXO_TYPES) | is_internal_wallet_hop)]
 
     if coins:
-        frame = frame[frame["Input Currency"].isin(coins) | frame["Output Currency"].isin(coins)]
+        canonical_coins = {_canonicalize_nexo_coin(coin) for coin in coins}
+        canonical_coins.discard("")
+        input_coins = frame["Input Currency"].map(_canonicalize_nexo_coin)
+        output_coins = frame["Output Currency"].map(_canonicalize_nexo_coin)
+        frame = frame[input_coins.isin(canonical_coins) | output_coins.isin(canonical_coins)]
 
     frame = frame.sort_values("Date", ascending=False).copy()
     if limit is not None:
