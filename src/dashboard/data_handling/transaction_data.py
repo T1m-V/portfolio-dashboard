@@ -1,6 +1,6 @@
 import pandas as pd
 
-from file_paths import PRICE_DATA_FOLDER, SNAPSHOT_FILE_PATH, STOCK_METADATA
+from file_paths import PRICE_DATA_FOLDER, SNAPSHOT_FILE_PATH, STOCK_METADATA, TRANSACTIONS_FILE_PATH
 
 COLS_TO_FILL = [
     "Quantity",
@@ -101,3 +101,35 @@ def load_and_process_data_group_stocks(
     df_merged[COLS_TO_FILL] = df_merged.groupby("ISIN")[COLS_TO_FILL].ffill().fillna(0)
 
     return _finalize_calculations(df=df_merged)
+
+
+def load_recent_stock_transactions(
+    *,
+    end_date_str: str,
+    isins: list[str] | None = None,
+    limit: int | None = 5,
+) -> pd.DataFrame:
+    """
+    Loads and filters latest stock transactions up to an as-of date.
+
+    args:
+        end_date_str: Selected dashboard date.
+        isins: Optional ISIN filter.
+        limit: Max number of rows.
+
+    returns:
+        Latest filtered transaction rows.
+    """
+    frame = pd.read_csv(TRANSACTIONS_FILE_PATH)
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    frame = frame.dropna(subset=["Date"])
+    frame = frame[frame["Date"] <= pd.to_datetime(end_date_str)]
+
+    if isins:
+        frame = frame[frame["ISIN"].isin(isins)]
+
+    frame = frame.sort_values("Date", ascending=False).copy()
+    if limit is not None:
+        frame = frame.head(limit)
+    frame["Date"] = frame["Date"].dt.strftime("%Y-%m-%d")
+    return frame

@@ -5,10 +5,13 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objs as go
-from dash import Dash, Input, Output, dcc, html
+from dash import Dash, Input, Output, State, ctx, dcc, html
 from plotly.subplots import make_subplots
 
-from dashboard.data_handling.transaction_data import load_and_process_data_group_stocks
+from dashboard.data_handling.transaction_data import (
+    load_and_process_data_group_stocks,
+    load_recent_stock_transactions,
+)
 from file_paths import STOCK_METADATA
 
 
@@ -35,6 +38,7 @@ COMPOSITION_MODES = [
     {"label": "Region", "value": AnalysisType.REGION},
     {"label": "Provider", "value": AnalysisType.PROVIDER},
 ]
+PAGE_SIZE = 5
 
 
 def fetch_portfolio_data(selected_date: str, selection: str, mode: str) -> Tuple[pd.DataFrame, str]:
@@ -52,11 +56,17 @@ def fetch_portfolio_data(selected_date: str, selection: str, mode: str) -> Tuple
         return df, title
 
     else:
-        isins_in_group = [
-            isin for isin, info in STOCK_METADATA.items() if info.get(mode) == selection
-        ]
+        isins_in_group = resolve_stock_isins(selection=selection, mode=mode)
         df = load_and_process_data_group_stocks(end_date_str=selected_date, isins=isins_in_group)
         return df, f"Group: {selection}"
+
+
+def resolve_stock_isins(selection: str, mode: str) -> list[str]:
+    if mode == AnalysisType.NAME:
+        return [selection]
+    if mode == AnalysisType.FULL:
+        return list(STOCK_METADATA.keys())
+    return [isin for isin, info in STOCK_METADATA.items() if info.get(mode) == selection]
 
 
 def create_pie_chart(df: pd.DataFrame, mode: str, comp_mode: str, selection: str) -> html.Div:
@@ -247,6 +257,64 @@ def generate_summary_stats(df: pd.DataFrame, selected_date: str, title_suffix: s
     )
 
 
+def create_quantity_line_chart(
+    df: pd.DataFrame,
+    selected_date: str,
+    title_suffix: str,
+) -> go.Figure:
+    if df.empty:
+        return go.Figure()
+
+    dt = pd.to_datetime(selected_date)
+    history_df = df[df["Date"] <= dt].copy()
+    quantity_history = history_df.groupby("Date").agg({"Quantity": "sum"}).reset_index()
+
+    fig = go.Figure(
+        data=[
+            go.Scatter(
+                x=quantity_history["Date"],
+                y=quantity_history["Quantity"],
+                name="Quantity",
+                mode="lines",
+            )
+        ]
+    )
+    fig.update_layout(
+        title=f"Quantity | {title_suffix}",
+        height=320,
+        hovermode="x unified",
+        template="plotly_white",
+        margin=dict(t=50, b=25, l=25, r=25),
+    )
+    return fig
+
+
+def render_recent_stock_transactions_table(tx: pd.DataFrame) -> html.Div:
+    if tx.empty:
+        return html.Div("No transactions found for this filter.")
+
+    display = tx.copy()
+    display["Quantity"] = pd.to_numeric(display["Quantity"], errors="coerce").round(6)
+    display["Price"] = pd.to_numeric(display["Price"], errors="coerce").round(4)
+    for col in ("Fees", "Taxes"):
+        if col in display.columns:
+            display[col] = pd.to_numeric(display[col], errors="coerce").round(2)
+
+    columns = ["Date", "Type", "Asset Name", "Quantity", "Price", "Currency", "Fees", "Taxes"]
+    columns = [col for col in columns if col in display.columns]
+    header = [html.Th(col) for col in columns]
+    body = [html.Tr([html.Td(row[col]) for col in columns]) for _, row in display.iterrows()]
+
+    return dbc.Table(
+        [html.Thead(html.Tr(header)), html.Tbody(body)],
+        bordered=True,
+        hover=True,
+        responsive=True,
+        size="sm",
+        className="mb-0",
+    )
+
+
 # --- 3. Main Callbacks ---
 
 
@@ -255,6 +323,7 @@ def register_stock_dashboard_callbacks(app: Dash):
         [
             Output("portfolio-pie-container", "children"),
             Output("value-over-time", "figure"),
+            Output("quantity-over-time", "figure"),
             Output("summary-stats", "children"),
             Output("composition-selector-wrapper", "style"),
         ],
@@ -267,11 +336,17 @@ def register_stock_dashboard_callbacks(app: Dash):
     )
     def update_dashboard(
         selected_date: str, selected_selection: str, mode: str, comp_mode: str
-    ) -> tuple[html.Div, go.Figure, html.Div]:
+    ) -> tuple[html.Div, go.Figure, go.Figure, html.Div, dict]:
         df_master, title_suffix = fetch_portfolio_data(selected_date, selected_selection, mode)
 
         if df_master.empty:
-            return html.Div("No data"), go.Figure(), html.Div("No data")
+            return (
+                html.Div("No data"),
+                go.Figure(),
+                go.Figure(),
+                html.Div("No data"),
+                {"display": "block"},
+            )
 
         # 1. Create the left-side content (Pie or Table)
         df_final_snapshot = df_master[df_master["Date"] == selected_date]
@@ -283,6 +358,9 @@ def register_stock_dashboard_callbacks(app: Dash):
         line_fig = create_performance_line_chart(
             df=df_master, selected_date=selected_date, title_suffix=title_suffix
         )
+        quantity_fig = create_quantity_line_chart(
+            df=df_master, selected_date=selected_date, title_suffix=title_suffix
+        )
 
         # 3. Summary Stats (Top Bar)
         summary_div = generate_summary_stats(
@@ -292,7 +370,66 @@ def register_stock_dashboard_callbacks(app: Dash):
         # Hide the "Composition By" dropdown if we are looking at a single asset
         comp_style = {"display": "none"} if mode == AnalysisType.NAME else {"display": "block"}
 
-        return side_content, line_fig, summary_div, comp_style
+        return side_content, line_fig, quantity_fig, summary_div, comp_style
+
+    @app.callback(
+        [
+            Output("stock-recent-transactions", "children"),
+            Output("stock-tx-page-store", "data"),
+            Output("stock-tx-page-label", "children"),
+            Output("stock-tx-prev", "disabled"),
+            Output("stock-tx-next", "disabled"),
+        ],
+        [
+            Input("date-picker", "date"),
+            Input("asset-selector", "value"),
+            Input("analysis-mode", "value"),
+            Input("stock-tx-prev", "n_clicks"),
+            Input("stock-tx-next", "n_clicks"),
+        ],
+        [State("stock-tx-page-store", "data")],
+    )
+    def update_stock_transactions(
+        selected_date: str,
+        selected_selection: str,
+        mode: str,
+        _prev_clicks: int | None,
+        _next_clicks: int | None,
+        current_page: int | None,
+    ) -> tuple[html.Div, int, str, bool, bool]:
+        triggered = ctx.triggered_id
+        page = int(current_page or 0)
+
+        if triggered in {"date-picker", "asset-selector", "analysis-mode"}:
+            page = 0
+        elif triggered == "stock-tx-prev":
+            page = max(page - 1, 0)
+        elif triggered == "stock-tx-next":
+            page += 1
+
+        isins = (
+            None
+            if mode == AnalysisType.FULL
+            else resolve_stock_isins(selection=selected_selection, mode=mode)
+        )
+        tx = load_recent_stock_transactions(end_date_str=selected_date, isins=isins, limit=None)
+        total = len(tx)
+        max_page = max((total - 1) // PAGE_SIZE, 0) if total else 0
+        page = min(page, max_page)
+
+        start = page * PAGE_SIZE
+        paged_tx = tx.iloc[start : start + PAGE_SIZE]
+        table = render_recent_stock_transactions_table(paged_tx)
+
+        if total == 0:
+            label = "No transactions"
+            return table, 0, label, True, True
+
+        shown_end = start + len(paged_tx)
+        label = f"Showing {start + 1}-{shown_end} of {total}"
+        prev_disabled = page <= 0
+        next_disabled = page >= max_page
+        return table, page, label, prev_disabled, next_disabled
 
     @app.callback(
         [
