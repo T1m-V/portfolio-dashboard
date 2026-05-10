@@ -175,6 +175,7 @@ h2 {
 }
 
 .filterRail,
+.periodCard,
 .metricStrip,
 .panel {
   border: 1px solid rgba(232, 255, 248, 0.1);
@@ -185,8 +186,12 @@ h2 {
 
 .filterRail {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 12px;
+  padding: 14px;
+}
+
+.periodCard {
   padding: 14px;
 }
 
@@ -237,6 +242,38 @@ h2 {
 .selectWrap select {
   appearance: none;
   padding-right: 34px;
+}
+
+.periodField {
+  min-width: 0;
+}
+
+.periodButtons {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.periodButtons button {
+  min-width: 0;
+  height: 44px;
+  overflow: hidden;
+  color: #9eacb9;
+  border: 1px solid rgba(232, 255, 248, 0.12);
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: 160ms ease;
+}
+
+.periodButtons button:hover,
+.periodButtons button.active {
+  color: #e8fff8;
+  border-color: rgba(45, 242, 201, 0.55);
+  background: rgba(45, 242, 201, 0.1);
 }
 
 .metricStrip {
@@ -426,11 +463,16 @@ tr:hover td {
   }
 
   .filterRail,
+  .periodCard,
   .metricStrip,
   .chartGrid,
   .tableGrid,
   .tableStack {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .periodButtons {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .tableStack {
@@ -450,12 +492,17 @@ tr:hover td {
 
   nav,
   .filterRail,
+  .periodCard,
   .metricStrip,
   .chartGrid,
   .tableGrid,
   .tableStack,
   .metadataGrid {
     grid-template-columns: 1fr;
+  }
+
+  .periodButtons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   h1 {

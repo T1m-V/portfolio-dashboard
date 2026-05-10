@@ -25,7 +25,7 @@ import {
   RefreshCcw,
   WalletCards
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type React from "react";
 import { fetchNexo, fetchOptions, fetchRealEstate, fetchStocks } from "./api";
 import type {
@@ -40,6 +40,7 @@ import type {
 } from "./types";
 
 type TabKey = "stocks" | "nexo" | "realEstate";
+type PeriodKey = "mtd" | "ytd" | "1y" | "3y" | "5y" | "sinceStart" | "custom";
 
 const tabs: { key: TabKey; label: string; icon: typeof WalletCards }[] = [
   { key: "stocks", label: "Stocks", icon: WalletCards },
@@ -67,9 +68,68 @@ const valueColumnTokens = [
   "usd equivalent",
   "value"
 ];
+const periodOptions: { key: Exclude<PeriodKey, "custom">; label: string }[] = [
+  { key: "mtd", label: "MtD" },
+  { key: "ytd", label: "YtD" },
+  { key: "1y", label: "1y" },
+  { key: "3y", label: "3y" },
+  { key: "5y", label: "5y" },
+  { key: "sinceStart", label: "Since start" }
+];
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function parseIsoDate(value: string): { year: number; month: number; day: number } {
+  const [year, month, day] = value.split("-").map(Number);
+  return { year, month, day };
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  return `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function shiftYears(value: string, years: number): string {
+  const date = parseIsoDate(value);
+  const targetYear = date.year - years;
+  const targetDay = Math.min(date.day, daysInMonth(targetYear, date.month));
+  return isoDate(targetYear, date.month, targetDay);
+}
+
+function maxIso(left: string, right: string): string {
+  return left > right ? left : right;
+}
+
+function minIso(left: string, right: string): string {
+  return left < right ? left : right;
+}
+
+function clampFromDate(value: string, asOfDate: string, startDate?: string | null): string {
+  const boundedToAsOf = minIso(value, asOfDate);
+  return startDate ? maxIso(boundedToAsOf, startDate) : boundedToAsOf;
+}
+
+function periodStartDate(period: PeriodKey, asOfDate: string, startDate?: string | null): string | null {
+  if (period === "custom") {
+    return null;
+  }
+  const asOf = parseIsoDate(asOfDate);
+  const calculated = {
+    mtd: isoDate(asOf.year, asOf.month, 1),
+    ytd: isoDate(asOf.year, 1, 1),
+    "1y": shiftYears(asOfDate, 1),
+    "3y": shiftYears(asOfDate, 3),
+    "5y": shiftYears(asOfDate, 5),
+    sinceStart: startDate ?? null
+  }[period];
+  return calculated ? clampFromDate(calculated, asOfDate, startDate) : null;
 }
 
 function shouldRoundToWhole(value: number): boolean {
@@ -169,12 +229,48 @@ function SelectField({
   );
 }
 
-function DateField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function DateField({
+  label,
+  value,
+  max,
+  onChange
+}: {
+  label: string;
+  value: string;
+  max?: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <label className="field">
-      <span>As-of</span>
-      <input type="date" value={value} onChange={(event) => onChange(event.target.value)} />
+      <span>{label}</span>
+      <input type="date" value={value} max={max} onChange={(event) => onChange(event.target.value)} />
     </label>
+  );
+}
+
+function PeriodSelector({
+  value,
+  onChange
+}: {
+  value: PeriodKey;
+  onChange: (value: Exclude<PeriodKey, "custom">) => void;
+}) {
+  return (
+    <div className="field periodField">
+      <span>Period</span>
+      <div className="periodButtons">
+        {periodOptions.map((option) => (
+          <button
+            className={value === option.key ? "active" : ""}
+            key={option.key}
+            type="button"
+            onClick={() => onChange(option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -437,12 +533,22 @@ function InvestmentDashboard({
   kind,
   options,
   date,
-  setDate
+  fromDate,
+  period,
+  onAsOfDateChange,
+  onFromDateChange,
+  onPeriodChange,
+  onStartDateChange
 }: {
   kind: "stocks" | "nexo";
   options: OptionsPayload;
   date: string;
-  setDate: (date: string) => void;
+  fromDate: string;
+  period: PeriodKey;
+  onAsOfDateChange: (date: string) => void;
+  onFromDateChange: (date: string) => void;
+  onPeriodChange: (period: Exclude<PeriodKey, "custom">) => void;
+  onStartDateChange: (date: string | null) => void;
 }) {
   const optionSet = options[kind];
   const [mode, setMode] = useState("full");
@@ -464,7 +570,7 @@ function InvestmentDashboard({
   }, [compositionOptions, composition]);
 
   useEffect(() => {
-    const params = new URLSearchParams({ date, mode, selection, composition });
+    const params = new URLSearchParams({ date, fromDate, mode, selection, composition });
     setLoading(true);
     setError("");
     const load = kind === "stocks" ? fetchStocks : fetchNexo;
@@ -472,7 +578,17 @@ function InvestmentDashboard({
       .then(setPayload)
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
-  }, [kind, date, mode, selection, composition]);
+  }, [kind, date, fromDate, mode, selection, composition]);
+
+  useEffect(() => {
+    onStartDateChange(null);
+  }, [kind, mode, selection, onStartDateChange]);
+
+  useEffect(() => {
+    if (payload?.startDate) {
+      onStartDateChange(payload.startDate);
+    }
+  }, [payload?.startDate, onStartDateChange]);
 
   return (
     <motion.div className="workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
@@ -484,8 +600,13 @@ function InvestmentDashboard({
         <div className="statusPill">{loading ? "Syncing" : "Live"}</div>
       </div>
 
+      <section className="periodCard">
+        <PeriodSelector value={period} onChange={onPeriodChange} />
+      </section>
+
       <section className="filterRail">
-        <DateField value={date} onChange={setDate} />
+        <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
+        <DateField label="To date" value={date} onChange={onAsOfDateChange} />
         <SelectField label="Analysis" value={mode} options={optionSet.analysisModes} onChange={setMode} />
         <SelectField label="Selection" value={selection} options={selectionOptions} disabled={mode === "full"} onChange={setSelection} />
         <SelectField label="Composition" value={composition} options={compositionOptions} disabled={mode === "name"} onChange={setComposition} />
@@ -513,11 +634,21 @@ function InvestmentDashboard({
 function RealEstateDashboard({
   options,
   date,
-  setDate
+  fromDate,
+  period,
+  onAsOfDateChange,
+  onFromDateChange,
+  onPeriodChange,
+  onStartDateChange
 }: {
   options: OptionsPayload;
   date: string;
-  setDate: (date: string) => void;
+  fromDate: string;
+  period: PeriodKey;
+  onAsOfDateChange: (date: string) => void;
+  onFromDateChange: (date: string) => void;
+  onPeriodChange: (period: Exclude<PeriodKey, "custom">) => void;
+  onStartDateChange: (date: string | null) => void;
 }) {
   const [asset, setAsset] = useState("ALL");
   const [outflowLimit, setOutflowLimit] = useState("5");
@@ -530,12 +661,22 @@ function RealEstateDashboard({
     : { data: [], keys: [] };
 
   useEffect(() => {
-    const params = new URLSearchParams({ date, asset, outflowLimit, inflowLimit });
+    const params = new URLSearchParams({ date, fromDate, asset, outflowLimit, inflowLimit });
     setLoading(true);
     fetchRealEstate(params)
       .then(setPayload)
       .finally(() => setLoading(false));
-  }, [date, asset, outflowLimit, inflowLimit]);
+  }, [date, fromDate, asset, outflowLimit, inflowLimit]);
+
+  useEffect(() => {
+    onStartDateChange(null);
+  }, [asset, onStartDateChange]);
+
+  useEffect(() => {
+    if (payload?.startDate) {
+      onStartDateChange(payload.startDate);
+    }
+  }, [payload?.startDate, onStartDateChange]);
 
   return (
     <motion.div className="workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
@@ -547,8 +688,13 @@ function RealEstateDashboard({
         <div className="statusPill">{loading ? "Syncing" : "Live"}</div>
       </div>
 
+      <section className="periodCard">
+        <PeriodSelector value={period} onChange={onPeriodChange} />
+      </section>
+
       <section className="filterRail">
-        <DateField value={date} onChange={setDate} />
+        <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
+        <DateField label="To date" value={date} onChange={onAsOfDateChange} />
         <SelectField label="Asset" value={asset} options={options.realEstate.assets} onChange={setAsset} />
         <SelectField label="Outflows" value={outflowLimit} options={rowLimitOptions} onChange={setOutflowLimit} />
         <SelectField label="Inflows" value={inflowLimit} options={rowLimitOptions} onChange={setInflowLimit} />
@@ -666,12 +812,68 @@ function RealEstateDashboard({
 export default function App() {
   const [active, setActive] = useState<TabKey>("stocks");
   const [date, setDate] = useState(todayIso());
+  const [customFromDate, setCustomFromDate] = useState(() => {
+    const today = parseIsoDate(todayIso());
+    return isoDate(today.year, 1, 1);
+  });
+  const [period, setPeriod] = useState<PeriodKey>("ytd");
+  const [activeStartDate, setActiveStartDate] = useState<string | null>(null);
   const [options, setOptions] = useState<OptionsPayload | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     fetchOptions().then(setOptions).catch((reason: Error) => setError(reason.message));
   }, []);
+
+  useEffect(() => {
+    setActiveStartDate(null);
+  }, [active]);
+
+  const fromDate = useMemo(() => {
+    if (period === "custom") {
+      return clampFromDate(customFromDate, date, activeStartDate);
+    }
+    return periodStartDate(period, date, activeStartDate) ?? customFromDate;
+  }, [activeStartDate, customFromDate, date, period]);
+
+  useEffect(() => {
+    if (period !== "custom") {
+      return;
+    }
+
+    const clamped = clampFromDate(customFromDate, date, activeStartDate);
+    if (clamped !== customFromDate) {
+      setCustomFromDate(clamped);
+    }
+  }, [activeStartDate, customFromDate, date, period]);
+
+  const handleAsOfDateChange = useCallback((value: string) => {
+    if (value) {
+      setDate(value);
+    }
+  }, []);
+
+  const handleFromDateChange = useCallback(
+    (value: string) => {
+      if (!value) {
+        return;
+      }
+      setPeriod("custom");
+      setCustomFromDate(clampFromDate(value, date, activeStartDate));
+    },
+    [activeStartDate, date]
+  );
+
+  const handlePeriodChange = useCallback(
+    (value: Exclude<PeriodKey, "custom">) => {
+      setPeriod(value);
+      const resolved = periodStartDate(value, date, activeStartDate);
+      if (resolved) {
+        setCustomFromDate(resolved);
+      }
+    },
+    [activeStartDate, date]
+  );
 
   return (
     <main className="appShell">
@@ -701,9 +903,44 @@ export default function App() {
         {options ? (
           <AnimatePresence mode="wait">
             <motion.div key={active} initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.985 }} transition={{ duration: 0.18 }}>
-              {active === "stocks" ? <InvestmentDashboard kind="stocks" options={options} date={date} setDate={setDate} /> : null}
-              {active === "nexo" ? <InvestmentDashboard kind="nexo" options={options} date={date} setDate={setDate} /> : null}
-              {active === "realEstate" ? <RealEstateDashboard options={options} date={date} setDate={setDate} /> : null}
+              {active === "stocks" ? (
+                <InvestmentDashboard
+                  kind="stocks"
+                  options={options}
+                  date={date}
+                  fromDate={fromDate}
+                  period={period}
+                  onAsOfDateChange={handleAsOfDateChange}
+                  onFromDateChange={handleFromDateChange}
+                  onPeriodChange={handlePeriodChange}
+                  onStartDateChange={setActiveStartDate}
+                />
+              ) : null}
+              {active === "nexo" ? (
+                <InvestmentDashboard
+                  kind="nexo"
+                  options={options}
+                  date={date}
+                  fromDate={fromDate}
+                  period={period}
+                  onAsOfDateChange={handleAsOfDateChange}
+                  onFromDateChange={handleFromDateChange}
+                  onPeriodChange={handlePeriodChange}
+                  onStartDateChange={setActiveStartDate}
+                />
+              ) : null}
+              {active === "realEstate" ? (
+                <RealEstateDashboard
+                  options={options}
+                  date={date}
+                  fromDate={fromDate}
+                  period={period}
+                  onAsOfDateChange={handleAsOfDateChange}
+                  onFromDateChange={handleFromDateChange}
+                  onPeriodChange={handlePeriodChange}
+                  onStartDateChange={setActiveStartDate}
+                />
+              ) : null}
             </motion.div>
           </AnimatePresence>
         ) : (

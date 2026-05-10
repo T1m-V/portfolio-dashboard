@@ -146,6 +146,66 @@ def list_nexo_coins() -> list[str]:
     return sorted(coins)
 
 
+def get_nexo_start_date(coins: list[str] | None = None) -> str | None:
+    """
+    Finds the first NEXO snapshot or relevant transaction date for a dashboard selection.
+
+    args:
+        coins: Optional coin filter. None means all NEXO assets.
+
+    returns:
+        First date as YYYY-MM-DD, or None when unavailable.
+    """
+    if coins == []:
+        return None
+
+    date_parts: list[pd.Series] = []
+    if NEXO_SNAPSHOT_PATH.exists():
+        snapshots = pd.read_csv(NEXO_SNAPSHOT_PATH, usecols=["Date", "Coin"])
+        snapshots["Date"] = pd.to_datetime(snapshots["Date"], errors="coerce")
+        snapshots = snapshots.dropna(subset=["Date"])
+        if coins:
+            snapshots = snapshots[snapshots["Coin"].isin(coins)]
+        if not snapshots.empty:
+            date_parts.append(snapshots["Date"])
+
+    transactions = _load_nexo_transaction_exports(NEXO_TRANSACTIONS_FOLDER)
+    if not transactions.empty and "Date / Time (UTC)" in transactions.columns:
+        transactions = transactions.copy()
+        transactions["Date"] = pd.to_datetime(
+            transactions["Date / Time (UTC)"],
+            dayfirst=True,
+            errors="coerce",
+        )
+        transactions = transactions.dropna(subset=["Date"])
+        type_series = transactions["Type"].fillna("").str.strip().str.lower()
+        details_series = transactions["Details"].fillna("").str.strip().str.lower()
+        is_internal_wallet_hop = details_series.str.contains(
+            r"transfer from .*wallet to .*wallet",
+            regex=True,
+            na=False,
+        )
+        transactions = transactions[
+            ~(type_series.isin(IGNORED_NEXO_TYPES) | is_internal_wallet_hop)
+        ]
+
+        if coins:
+            canonical_coins = {_canonicalize_nexo_coin(coin) for coin in coins}
+            canonical_coins.discard("")
+            input_coins = transactions["Input Currency"].map(_canonicalize_nexo_coin)
+            output_coins = transactions["Output Currency"].map(_canonicalize_nexo_coin)
+            transactions = transactions[
+                input_coins.isin(canonical_coins) | output_coins.isin(canonical_coins)
+            ]
+
+        if not transactions.empty:
+            date_parts.append(transactions["Date"])
+
+    if not date_parts:
+        return None
+    return pd.concat(date_parts).min().strftime("%Y-%m-%d")
+
+
 def load_and_process_nexo_data(end_date_str: str, coins: list[str] | None = None) -> pd.DataFrame:
     end_dt = pd.to_datetime(end_date_str)
     snapshots = _load_nexo_snapshot(end_dt=end_dt, coins=coins)
