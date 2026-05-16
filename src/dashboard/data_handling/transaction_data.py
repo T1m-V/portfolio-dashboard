@@ -133,3 +133,26 @@ def load_recent_stock_transactions(
         frame = frame.head(limit)
     frame["Date"] = frame["Date"].dt.strftime("%Y-%m-%d")
     return frame
+
+
+def get_stock_start_date(isins: list[str] | None = None) -> str | None:
+    """
+    Finds the first stock transaction date for a dashboard selection.
+
+    args:
+        isins: Optional ISIN filter. None means all stocks.
+
+    returns:
+        First transaction date as YYYY-MM-DD, or None when unavailable.
+    """
+    if isins == [] or not TRANSACTIONS_FILE_PATH.exists():
+        return None
+
+    frame = pd.read_csv(TRANSACTIONS_FILE_PATH, usecols=["Date", "ISIN"])
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    frame = frame.dropna(subset=["Date"])
+    if isins:
+        frame = frame[frame["ISIN"].isin(isins)]
+    if frame.empty:
+        return None
+    return frame["Date"].min().strftime("%Y-%m-%d")

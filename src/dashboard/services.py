@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from dashboard.data_handling.nexo_data import (
+    get_nexo_start_date,
     list_nexo_coins,
     load_and_process_nexo_data,
     load_recent_nexo_transactions,
@@ -24,6 +25,7 @@ from dashboard.data_handling.real_estate_data import (
     summarize_mortgages_from_rows,
 )
 from dashboard.data_handling.transaction_data import (
+    get_stock_start_date,
     load_and_process_data_group_stocks,
     load_recent_stock_transactions,
 )
@@ -98,6 +100,36 @@ def _safe_frame(load_fn, *args, **kwargs) -> pd.DataFrame:
 def _currency(value: float) -> str:
     decimals = 0 if abs(value) > 100 else 2
     return f"EUR {value:,.{decimals}f}"
+
+
+def _date_window(*, selected_date: str, from_date: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    end = pd.to_datetime(selected_date).normalize()
+    start = pd.to_datetime(from_date).normalize()
+    if start > end:
+        start = end
+    return start, end
+
+
+def _date_window_strings(*, selected_date: str, from_date: str | None) -> tuple[str, str]:
+    start, end = _date_window(
+        selected_date=selected_date,
+        from_date=from_date or selected_date,
+    )
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def _filter_period_rows(
+    frame: pd.DataFrame,
+    *,
+    from_date: str,
+    selected_date: str,
+) -> pd.DataFrame:
+    if frame.empty or "Date" not in frame.columns:
+        return frame.copy()
+
+    start, end = _date_window(selected_date=selected_date, from_date=from_date)
+    dates = pd.to_datetime(frame["Date"])
+    return frame[(dates >= start) & (dates <= end)].copy()
 
 
 def _resolve_stock_isins(*, selection: str, mode: str) -> list[str]:
@@ -185,6 +217,7 @@ def _summarize_investment_frame(
     *,
     frame: pd.DataFrame,
     selected_date: str,
+    from_date: str,
     title: str,
 ) -> dict[str, Any]:
     if frame.empty or "Date" not in frame.columns:
@@ -196,7 +229,8 @@ def _summarize_investment_frame(
             "profitLoss": 0,
         }
 
-    day = frame[frame["Date"] == pd.to_datetime(selected_date)].copy()
+    _, end = _date_window(selected_date=selected_date, from_date=from_date)
+    day = _investment_snapshot(frame=frame, target_date=end, include_target=True)
     if day.empty:
         return {
             "title": title,
@@ -206,12 +240,18 @@ def _summarize_investment_frame(
             "profitLoss": 0,
         }
 
-    total_value = float(day["Market Value"].sum())
-    dividends = float(day["Gross Dividends"].sum())
-    fees = float(day["Cumulative Fees"].sum())
-    taxes = float(day["Cumulative Taxes"].sum())
-    net_invested = float(day["Principal Invested"].sum() + fees + taxes - dividends)
-    profit_loss = total_value - net_invested
+    start, _ = _date_window(selected_date=selected_date, from_date=from_date)
+    baseline = _investment_snapshot(frame=frame, target_date=start, include_target=False)
+    end_totals = _investment_totals(day)
+    baseline_totals = _investment_totals(baseline)
+
+    total_value = end_totals["market_value"]
+    dividends = end_totals["dividends"] - baseline_totals["dividends"]
+    fees = end_totals["fees"] - baseline_totals["fees"]
+    taxes = end_totals["taxes"] - baseline_totals["taxes"]
+    principal = end_totals["principal"] - baseline_totals["principal"]
+    net_invested = principal + fees + taxes - dividends
+    profit_loss = (total_value - baseline_totals["market_value"]) - net_invested
     return {
         "title": title,
         "empty": False,
@@ -228,10 +268,60 @@ def _summarize_investment_frame(
     }
 
 
-def _investment_history(frame: pd.DataFrame, selected_date: str) -> list[dict[str, Any]]:
+def _investment_snapshot(
+    *,
+    frame: pd.DataFrame,
+    target_date: pd.Timestamp,
+    include_target: bool,
+) -> pd.DataFrame:
+    if frame.empty or "Date" not in frame.columns:
+        return pd.DataFrame()
+
+    date_series = pd.to_datetime(frame["Date"])
+    mask = date_series <= target_date if include_target else date_series < target_date
+    candidates = frame[mask].copy()
+    if candidates.empty:
+        return pd.DataFrame()
+
+    snapshot_date = pd.to_datetime(candidates["Date"]).max()
+    return candidates[pd.to_datetime(candidates["Date"]) == snapshot_date].copy()
+
+
+def _investment_totals(frame: pd.DataFrame) -> dict[str, float]:
+    if frame.empty:
+        return {
+            "market_value": 0.0,
+            "principal": 0.0,
+            "fees": 0.0,
+            "taxes": 0.0,
+            "dividends": 0.0,
+            "net_invested": 0.0,
+        }
+
+    fees = float(frame["Cumulative Fees"].sum())
+    taxes = float(frame["Cumulative Taxes"].sum())
+    dividends = float(frame["Gross Dividends"].sum())
+    principal = float(frame["Principal Invested"].sum())
+    return {
+        "market_value": float(frame["Market Value"].sum()),
+        "principal": principal,
+        "fees": fees,
+        "taxes": taxes,
+        "dividends": dividends,
+        "net_invested": principal + fees + taxes - dividends,
+    }
+
+
+def _investment_history(
+    frame: pd.DataFrame,
+    *,
+    selected_date: str,
+    from_date: str,
+) -> list[dict[str, Any]]:
     if frame.empty or "Date" not in frame.columns:
         return []
-    history = frame[frame["Date"] <= pd.to_datetime(selected_date)].copy()
+    _, end = _date_window(selected_date=selected_date, from_date=from_date)
+    history = frame[frame["Date"] <= end].copy()
     history["Invested Capital"] = (
         history["Principal Invested"]
         + history["Cumulative Fees"]
@@ -243,7 +333,23 @@ def _investment_history(frame: pd.DataFrame, selected_date: str) -> list[dict[st
         .agg({"Market Value": "sum", "Invested Capital": "sum", "Quantity": "sum"})
         .reset_index()
     )
-    grouped["Profit/Loss"] = grouped["Market Value"] - grouped["Invested Capital"]
+    start, _ = _date_window(selected_date=selected_date, from_date=from_date)
+    baseline_candidates = grouped[grouped["Date"] < start]
+    if baseline_candidates.empty:
+        baseline_market_value = 0.0
+        baseline_invested = 0.0
+    else:
+        baseline = baseline_candidates.iloc[-1]
+        baseline_market_value = float(baseline["Market Value"])
+        baseline_invested = float(baseline["Invested Capital"])
+
+    grouped = grouped[(grouped["Date"] >= start) & (grouped["Date"] <= end)].copy()
+    if grouped.empty:
+        return []
+
+    grouped["Profit/Loss"] = (grouped["Market Value"] - baseline_market_value) - (
+        grouped["Invested Capital"] - baseline_invested
+    )
     return _records(grouped)
 
 
@@ -324,10 +430,15 @@ def _table_payload(frame: pd.DataFrame, *, columns: list[str]) -> dict[str, Any]
 def build_stock_payload(
     *,
     selected_date: str,
+    from_date: str | None,
     mode: str,
     selection: str,
     composition: str,
 ) -> dict[str, Any]:
+    from_date, selected_date = _date_window_strings(
+        selected_date=selected_date,
+        from_date=from_date,
+    )
     isins = None if mode == "full" else _resolve_stock_isins(selection=selection, mode=mode)
     frame = _safe_frame(load_and_process_data_group_stocks, end_date_str=selected_date, isins=isins)
     title = _stock_title(mode=mode, selection=selection)
@@ -340,8 +451,14 @@ def build_stock_payload(
     )
     return {
         "title": title,
+        "asOfDate": selected_date,
+        "fromDate": from_date,
+        "startDate": get_stock_start_date(isins=isins) or selected_date,
         "summary": _summarize_investment_frame(
-            frame=frame, selected_date=selected_date, title=title
+            frame=frame,
+            selected_date=selected_date,
+            from_date=from_date,
+            title=title,
         ),
         "composition": _stock_composition(
             frame=snapshot,
@@ -349,7 +466,11 @@ def build_stock_payload(
             selection=selection,
             composition=composition,
         ),
-        "history": _investment_history(frame, selected_date),
+        "history": _investment_history(
+            frame,
+            selected_date=selected_date,
+            from_date=from_date,
+        ),
         "transactions": _table_payload(
             tx,
             columns=[
@@ -369,10 +490,15 @@ def build_stock_payload(
 def build_nexo_payload(
     *,
     selected_date: str,
+    from_date: str | None,
     mode: str,
     selection: str,
     composition: str,
 ) -> dict[str, Any]:
+    from_date, selected_date = _date_window_strings(
+        selected_date=selected_date,
+        from_date=from_date,
+    )
     coins = None if mode == "full" else _resolve_nexo_coins(selection=selection, mode=mode)
     frame = _safe_frame(load_and_process_nexo_data, end_date_str=selected_date, coins=coins)
     title = _nexo_title(mode=mode, selection=selection)
@@ -389,8 +515,14 @@ def build_nexo_payload(
         tx["Output"] = tx["Output Amount"].astype(str) + " " + tx["Output Currency"].astype(str)
     return {
         "title": title,
+        "asOfDate": selected_date,
+        "fromDate": from_date,
+        "startDate": get_nexo_start_date(coins=coins) or selected_date,
         "summary": _summarize_investment_frame(
-            frame=frame, selected_date=selected_date, title=title
+            frame=frame,
+            selected_date=selected_date,
+            from_date=from_date,
+            title=title,
         ),
         "composition": _nexo_composition(
             frame=snapshot,
@@ -398,7 +530,11 @@ def build_nexo_payload(
             selection=selection,
             composition=composition,
         ),
-        "history": _investment_history(frame, selected_date),
+        "history": _investment_history(
+            frame,
+            selected_date=selected_date,
+            from_date=from_date,
+        ),
         "transactions": _table_payload(
             tx,
             columns=["Date", "Type", "Input", "Output", "USD Equivalent", "Details"],
@@ -416,6 +552,30 @@ def _resolve_limit(value: int | str | None) -> int | None:
 
 def _real_estate_table(frame: pd.DataFrame) -> dict[str, Any]:
     return {"columns": list(frame.columns), "rows": _records(frame)}
+
+
+def _real_estate_start_date(*frames: pd.DataFrame) -> str | None:
+    date_parts = [
+        pd.to_datetime(frame["Date"], errors="coerce").dropna()
+        for frame in frames
+        if not frame.empty and "Date" in frame.columns
+    ]
+    if not date_parts:
+        return None
+    return pd.concat(date_parts).min().strftime("%Y-%m-%d")
+
+
+def _real_estate_period_net_cash_out(
+    *,
+    costs: pd.DataFrame,
+    inflows: pd.DataFrame,
+    mortgages: pd.DataFrame,
+) -> float:
+    total_costs = float(costs["Amount"].sum()) if not costs.empty else 0.0
+    total_inflows = float(inflows["Amount"].sum()) if not inflows.empty else 0.0
+    total_interest = float(mortgages["Interest Paid"].sum()) if not mortgages.empty else 0.0
+    total_repaid = float(mortgages["Principal Repaid"].sum()) if not mortgages.empty else 0.0
+    return round(total_costs + total_interest + total_repaid - total_inflows, 2)
 
 
 def _real_estate_outflow_breakdown(costs: pd.DataFrame, mortgages: pd.DataFrame) -> list[dict]:
@@ -463,8 +623,19 @@ def _real_estate_pl_breakdown(
     value_equity: pd.DataFrame,
     monthly_cashflow: pd.DataFrame,
 ) -> list[dict]:
+    return _records(
+        _real_estate_pl_frame(value_equity=value_equity, monthly_cashflow=monthly_cashflow)
+    )
+
+
+def _real_estate_pl_frame(
+    value_equity: pd.DataFrame,
+    monthly_cashflow: pd.DataFrame,
+) -> pd.DataFrame:
     if value_equity.empty and monthly_cashflow.empty:
-        return []
+        return pd.DataFrame(
+            columns=["Date", "Estimated Equity", "Cumulative Net Cash Flow", "Total P/L"]
+        )
 
     equity_frame = (
         value_equity[["Date", "Estimated Equity"]]
@@ -493,21 +664,93 @@ def _real_estate_pl_breakdown(
     merged["Estimated Equity"] = merged["Estimated Equity"].ffill().fillna(0.0)
     merged["Cumulative Net Cash Flow"] = merged["Cumulative Net Cash Flow"].ffill().fillna(0.0)
     merged["Total P/L"] = merged["Estimated Equity"] + merged["Cumulative Net Cash Flow"]
-    return _records(merged)
+    return merged
+
+
+def _real_estate_period_pl_breakdown(
+    *,
+    value_equity: pd.DataFrame,
+    monthly_cashflow: pd.DataFrame,
+    from_date: str,
+    selected_date: str,
+) -> list[dict]:
+    frame = _real_estate_pl_frame(value_equity=value_equity, monthly_cashflow=monthly_cashflow)
+    if frame.empty:
+        return []
+
+    start, end = _date_window(selected_date=selected_date, from_date=from_date)
+    frame = frame[pd.to_datetime(frame["Date"]) <= end].sort_values(by="Date").copy()
+    if frame.empty:
+        return []
+
+    value_columns = ["Estimated Equity", "Cumulative Net Cash Flow", "Total P/L"]
+    baseline_candidates = frame[pd.to_datetime(frame["Date"]) < start]
+    if baseline_candidates.empty:
+        baseline = {column: 0.0 for column in value_columns}
+    else:
+        baseline_row = baseline_candidates.iloc[-1]
+        baseline = {column: float(baseline_row[column]) for column in value_columns}
+
+    period = frame[
+        (pd.to_datetime(frame["Date"]) >= start) & (pd.to_datetime(frame["Date"]) <= end)
+    ].copy()
+    for column in value_columns:
+        period[column] = pd.to_numeric(period[column], errors="coerce").fillna(0.0)
+        period[column] = period[column] - baseline[column]
+
+    if period.empty or not (pd.to_datetime(period["Date"]) == start).any():
+        period = pd.concat(
+            [
+                pd.DataFrame(
+                    [
+                        {
+                            "Date": start,
+                            "Estimated Equity": 0.0,
+                            "Cumulative Net Cash Flow": 0.0,
+                            "Total P/L": 0.0,
+                        }
+                    ]
+                ),
+                period,
+            ],
+            ignore_index=True,
+        )
+
+    return _records(period.sort_values(by="Date").drop_duplicates(subset=["Date"], keep="last"))
 
 
 def build_real_estate_payload(
     *,
     selected_date: str,
+    from_date: str | None,
     asset: str,
     outflow_limit: int | str | None,
     inflow_limit: int | str | None,
 ) -> dict[str, Any]:
+    from_date, selected_date = _date_window_strings(
+        selected_date=selected_date,
+        from_date=from_date,
+    )
     bundle = load_real_estate_bundle(asof_date=selected_date)
     costs = filter_asset(frame=bundle.costs, asset=asset)
     inflows = filter_asset(frame=bundle.inflows, asset=asset)
     values = filter_asset(frame=bundle.values, asset=asset)
     mortgages = filter_asset(frame=bundle.mortgages, asset=asset)
+    period_costs = _filter_period_rows(
+        costs,
+        from_date=from_date,
+        selected_date=selected_date,
+    )
+    period_inflows = _filter_period_rows(
+        inflows,
+        from_date=from_date,
+        selected_date=selected_date,
+    )
+    period_mortgages = _filter_period_rows(
+        mortgages,
+        from_date=from_date,
+        selected_date=selected_date,
+    )
 
     metrics = calculate_snapshot_metrics(
         costs=costs,
@@ -515,16 +758,35 @@ def build_real_estate_payload(
         values=values,
         mortgages=mortgages,
     )
-    monthly_cashflow = build_monthly_cashflow_frame(
+    period_net_cash_out = _real_estate_period_net_cash_out(
+        costs=period_costs,
+        inflows=period_inflows,
+        mortgages=period_mortgages,
+    )
+    lifetime_cashflow = build_monthly_cashflow_frame(
         costs=costs,
         inflows=inflows,
         mortgages=mortgages,
     )
-    mortgage_balance = build_mortgage_balance_frame(mortgages=mortgages)
-    value_equity = build_value_equity_frame(
+    monthly_cashflow = build_monthly_cashflow_frame(
+        costs=period_costs,
+        inflows=period_inflows,
+        mortgages=period_mortgages,
+    )
+    mortgage_balance = _filter_period_rows(
+        build_mortgage_balance_frame(mortgages=mortgages),
+        from_date=from_date,
+        selected_date=selected_date,
+    )
+    value_equity_full = build_value_equity_frame(
         values=values,
         mortgages=mortgages,
         asof_date=selected_date,
+    )
+    value_equity = _filter_period_rows(
+        value_equity_full,
+        from_date=from_date,
+        selected_date=selected_date,
     )
     mortgage_summary = summarize_mortgages_from_rows(mortgages=mortgages)
     recent_outflows = build_recent_outflows_frame(
@@ -536,6 +798,9 @@ def build_real_estate_payload(
 
     return {
         "title": "Real Estate" if asset == "ALL" else asset,
+        "asOfDate": selected_date,
+        "fromDate": from_date,
+        "startDate": _real_estate_start_date(costs, inflows, values, mortgages) or selected_date,
         "summary": {
             "title": "Real Estate",
             "metrics": [
@@ -556,23 +821,25 @@ def build_real_estate_payload(
                 },
                 {
                     "label": "Net Cash Out",
-                    "value": metrics["net_cash_out"],
-                    "display": _currency(metrics["net_cash_out"]),
+                    "value": period_net_cash_out,
+                    "display": _currency(period_net_cash_out),
                 },
             ],
         },
         "valueEquity": _records(value_equity),
         "cashflow": _records(monthly_cashflow),
-        "plBreakdown": _real_estate_pl_breakdown(
-            value_equity=value_equity,
-            monthly_cashflow=monthly_cashflow,
+        "plBreakdown": _real_estate_period_pl_breakdown(
+            value_equity=value_equity_full,
+            monthly_cashflow=lifetime_cashflow,
+            from_date=from_date,
+            selected_date=selected_date,
         ),
         "mortgageBalance": _records(mortgage_balance),
         "outflowBreakdown": _real_estate_outflow_breakdown(
-            costs=costs,
-            mortgages=mortgages,
+            costs=period_costs,
+            mortgages=period_mortgages,
         ),
-        "inflowBreakdown": _real_estate_inflow_breakdown(inflows=inflows),
+        "inflowBreakdown": _real_estate_inflow_breakdown(inflows=period_inflows),
         "mortgageSummary": _real_estate_table(mortgage_summary),
         "recentOutflows": _real_estate_table(recent_outflows),
         "recentInflows": _real_estate_table(recent_inflows),

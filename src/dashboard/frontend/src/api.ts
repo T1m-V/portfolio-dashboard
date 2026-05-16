@@ -1,7 +1,11 @@
 import type { InvestmentPayload, OptionsPayload, RealEstatePayload } from "./types";
 
+const apiBaseUrl =
+  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
+    ?.VITE_DASHBOARD_API_URL ?? "";
+
 async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await fetch(`${apiBaseUrl}${url}`);
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }

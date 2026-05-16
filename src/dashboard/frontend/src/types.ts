@@ -30,6 +30,9 @@ export type CompositionPayload =
 
 export type InvestmentPayload = {
   title: string;
+  asOfDate: string;
+  fromDate: string;
+  startDate: string;
   summary: {
     title: string;
     empty?: boolean;
@@ -44,6 +47,9 @@ export type InvestmentPayload = {
 
 export type RealEstatePayload = {
   title: string;
+  asOfDate: string;
+  fromDate: string;
+  startDate: string;
   summary: {
     title: string;
     metrics: Metric[];
