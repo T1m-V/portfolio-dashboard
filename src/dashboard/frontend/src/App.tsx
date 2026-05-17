@@ -22,13 +22,16 @@ import {
   Coins,
   Gauge,
   Layers3,
+  Power,
   RefreshCcw,
+  ShieldCheck,
   WalletCards
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type React from "react";
-import { fetchNexo, fetchOptions, fetchRealEstate, fetchStocks } from "./api";
+import { fetchArbitrum, fetchNexo, fetchOptions, fetchRealEstate, fetchStocks, stopServer } from "./api";
 import type {
+  ArbitrumPayload,
   CompositionPayload,
   BreakdownItem,
   InvestmentPayload,
@@ -39,15 +42,17 @@ import type {
   TablePayload
 } from "./types";
 
-type TabKey = "stocks" | "nexo" | "realEstate";
+type TabKey = "stocks" | "nexo" | "arbitrum" | "realEstate";
 type PeriodKey = "mtd" | "ytd" | "1y" | "3y" | "5y" | "sinceStart" | "custom";
 
 const tabs: { key: TabKey; label: string; icon: typeof WalletCards }[] = [
   { key: "stocks", label: "Stocks", icon: WalletCards },
   { key: "nexo", label: "NEXO", icon: Coins },
+  { key: "arbitrum", label: "Arbitrum", icon: ShieldCheck },
   { key: "realEstate", label: "Real Estate", icon: Building2 }
 ];
 
+const fullPortfolioOption: Option = { label: "Full Portfolio", value: "full" };
 const accentColors = ["#2df2c9", "#b7ff5a", "#7aa7ff", "#ff63a5", "#f6d45d", "#9c7bff"];
 const valueColumnTokens = [
   "amount",
@@ -64,6 +69,7 @@ const valueColumnTokens = [
   "p/l",
   "price",
   "principal",
+  "profit",
   "tax",
   "usd equivalent",
   "value"
@@ -157,6 +163,9 @@ function formatValue(value: unknown): string {
 }
 
 function formatMetric(metric: Metric): string {
+  if (metric.status) {
+    return metric.display;
+  }
   const currencyPrefix = metric.display.match(/^[A-Z]{3}\s/)?.[0] ?? "";
   return `${currencyPrefix}${formatValue(metric.value)}`;
 }
@@ -182,10 +191,11 @@ function optionValue(options: Option[], current: string): string {
   return options[0]?.value ?? "";
 }
 
+function withFullPortfolio(options: Option[]): Option[] {
+  return [fullPortfolioOption, ...options.filter((option) => option.value !== fullPortfolioOption.value)];
+}
+
 function groupsForMode(options: Option[], mode: string): Option[] {
-  if (mode === "full") {
-    return [];
-  }
   if (mode === "name") {
     return options;
   }
@@ -274,6 +284,36 @@ function PeriodSelector({
   );
 }
 
+function SegmentedControl({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: Option[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="segmentedControl">
+      <span>{label}</span>
+      <div className="segmentButtons">
+        {options.map((option) => (
+          <button
+            className={value === option.value ? "active" : ""}
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MetricStrip({ metrics }: { metrics: Metric[] }) {
   if (!metrics.length) {
     return <div className="emptyState">No metrics for this selection.</div>;
@@ -282,9 +322,10 @@ function MetricStrip({ metrics }: { metrics: Metric[] }) {
     <section className="metricStrip">
       {metrics.map((metric, index) => {
         const negative = metric.value < 0;
+        const status = metric.status?.toLowerCase();
         return (
           <motion.div
-            className="metric"
+            className={`metric ${status ? `status-${status}` : ""}`}
             key={metric.label}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -303,17 +344,22 @@ function MetricStrip({ metrics }: { metrics: Metric[] }) {
 function Panel({
   title,
   icon,
+  action,
   children
 }: {
   title: string;
   icon?: React.ReactNode;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="panel">
       <div className="panelTitle">
-        {icon}
-        <h2>{title}</h2>
+        <div className="panelTitleMain">
+          {icon}
+          <h2>{title}</h2>
+        </div>
+        {action ? <div className="panelAction">{action}</div> : null}
       </div>
       {children}
     </section>
@@ -388,7 +434,13 @@ function BreakdownDonut({ items, emptyLabel }: { items: BreakdownItem[]; emptyLa
   );
 }
 
-function InvestmentCharts({ payload }: { payload: InvestmentPayload }) {
+function InvestmentCharts({
+  payload,
+  compositionControl
+}: {
+  payload: InvestmentPayload;
+  compositionControl?: React.ReactNode;
+}) {
   const history = payload.history;
   return (
     <div className="chartGrid">
@@ -415,7 +467,7 @@ function InvestmentCharts({ payload }: { payload: InvestmentPayload }) {
         )}
       </Panel>
 
-      <Panel title="Composition" icon={<Layers3 size={18} />}>
+      <Panel title="Composition" icon={<Layers3 size={18} />} action={compositionControl}>
         <Composition payload={payload.composition} />
       </Panel>
 
@@ -529,6 +581,230 @@ function DataTable({ table, emptyLabel }: { table: TablePayload; emptyLabel: str
   );
 }
 
+function ArbitrumDashboard({
+  options,
+  date,
+  fromDate,
+  period,
+  onAsOfDateChange,
+  onFromDateChange,
+  onPeriodChange,
+  onStartDateChange
+}: {
+  options: OptionsPayload;
+  date: string;
+  fromDate: string;
+  period: PeriodKey;
+  onAsOfDateChange: (date: string) => void;
+  onFromDateChange: (date: string) => void;
+  onPeriodChange: (period: Exclude<PeriodKey, "custom">) => void;
+  onStartDateChange: (date: string | null) => void;
+}) {
+  const optionSet = options.arbitrum;
+  const [selection, setSelection] = useState("full");
+  const [composition, setComposition] = useState("name");
+  const [currency, setCurrency] = useState("EUR");
+  const [payload, setPayload] = useState<ArbitrumPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const selectionOptions = useMemo(
+    () => withFullPortfolio(optionSet.assets),
+    [optionSet.assets]
+  );
+  const compositionOptions = optionSet.compositionModes;
+  const mode = selection === fullPortfolioOption.value ? "full" : "name";
+  const requestSelection = selection === fullPortfolioOption.value ? "" : selection;
+  const selectionReady = selectionOptions.some((option) => option.value === selection);
+
+  useEffect(() => {
+    setSelection(optionValue(selectionOptions, selection));
+  }, [selectionOptions, selection]);
+
+  useEffect(() => {
+    setComposition(optionValue(compositionOptions, composition));
+  }, [compositionOptions, composition]);
+
+  useEffect(() => {
+    setCurrency(optionValue(optionSet.currencies, currency));
+  }, [optionSet.currencies, currency]);
+
+  useEffect(() => {
+    if (!selectionReady) {
+      return;
+    }
+
+    const params = new URLSearchParams({
+      date,
+      fromDate,
+      mode,
+      selection: requestSelection,
+      composition,
+      currency
+    });
+    let activeRequest = true;
+    setLoading(true);
+    setError("");
+    fetchArbitrum(params)
+      .then((nextPayload) => {
+        if (activeRequest) {
+          setPayload(nextPayload);
+        }
+      })
+      .catch((reason: Error) => {
+        if (activeRequest) {
+          setError(reason.message);
+        }
+      })
+      .finally(() => {
+        if (activeRequest) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      activeRequest = false;
+    };
+  }, [date, fromDate, mode, requestSelection, composition, currency, selectionReady]);
+
+  useEffect(() => {
+    onStartDateChange(null);
+  }, [mode, requestSelection, onStartDateChange]);
+
+  useEffect(() => {
+    if (payload?.startDate) {
+      onStartDateChange(payload.startDate);
+    }
+  }, [payload?.startDate, onStartDateChange]);
+
+  return (
+    <motion.div className="workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="workspaceHeader">
+        <div>
+          <p className="eyebrow">On-chain portfolio</p>
+          <h1>{payload?.title ?? "Arbitrum Portfolio"}</h1>
+        </div>
+        <div className="statusPill">{loading ? "Syncing" : "Live"}</div>
+      </div>
+
+      <section className="periodCard">
+        <PeriodSelector value={period} onChange={onPeriodChange} />
+      </section>
+
+      <section className="filterRail arbitrumRail">
+        <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
+        <DateField label="To date" value={date} onChange={onAsOfDateChange} />
+        <SelectField label="Selection" value={selection} options={selectionOptions} onChange={setSelection} />
+        <SelectField label="Composition" value={composition} options={compositionOptions} onChange={setComposition} />
+        <SegmentedControl label="Currency" value={currency} options={optionSet.currencies} onChange={setCurrency} />
+      </section>
+
+      {error ? <div className="warning">{error}</div> : null}
+      {(payload?.warnings ?? []).map((warning) => (
+        <div className="warning" key={warning}>{warning}</div>
+      ))}
+
+      {payload ? (
+        <>
+          <MetricStrip metrics={payload.summary.metrics} />
+          <div className="chartGrid">
+            <Panel title="Portfolio Value" icon={<Activity size={18} />}>
+              {payload.valueHistory.length ? (
+                <ResponsiveContainer height={300}>
+                  <AreaChart data={payload.valueHistory}>
+                    <defs>
+                      <linearGradient id="arbValue" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#2df2c9" stopOpacity={0.42} />
+                        <stop offset="95%" stopColor="#2df2c9" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
+                    <Tooltip {...chartTooltip()} />
+                    <Area dataKey="Market Value" stroke="#2df2c9" fill="url(#arbValue)" strokeWidth={2.5} />
+                    <Line dataKey="Invested Capital" stroke="#b7ff5a" dot={false} strokeDasharray="5 5" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyState label="No value history." />
+              )}
+            </Panel>
+
+            <Panel title="Composition" icon={<Layers3 size={18} />}>
+              <Composition payload={payload.composition} />
+            </Panel>
+
+            <Panel title="Profit/Loss" icon={<Gauge size={18} />}>
+              {payload.valueHistory.length ? (
+                <ResponsiveContainer height={260}>
+                  <AreaChart data={payload.valueHistory}>
+                    <defs>
+                      <linearGradient id="arbProfitLoss" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="5%" stopColor="#b7ff5a" stopOpacity={0.38} />
+                        <stop offset="95%" stopColor="#b7ff5a" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
+                    <Tooltip {...chartTooltip()} />
+                    <Area dataKey="Profit/Loss" stroke="#b7ff5a" fill="url(#arbProfitLoss)" strokeWidth={2.5} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyState label="No profit/loss history." />
+              )}
+            </Panel>
+
+            <Panel title={mode === "name" ? "Quantity" : "Transaction Activity"} icon={<RefreshCcw size={18} />}>
+              {mode === "name" ? (
+                payload.valueHistory.length ? (
+                  <ResponsiveContainer height={260}>
+                    <LineChart data={payload.valueHistory}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                      <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatNumber} tickLine={false} axisLine={false} />
+                      <Tooltip {...chartTooltip()} />
+                      <Line dataKey="Quantity" stroke="#7aa7ff" dot={false} strokeWidth={2.5} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState label="No quantity history." />
+                )
+              ) : payload.transactionsDaily.length ? (
+                <ResponsiveContainer height={260}>
+                  <BarChart data={payload.transactionsDaily}>
+                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
+                    <Tooltip {...chartTooltip()} />
+                    <Bar dataKey="Tx Count" fill="#7aa7ff" radius={[5, 5, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyState label="No transaction activity." />
+              )}
+            </Panel>
+          </div>
+          <div className="tableStack">
+            {mode === "name" ? (
+              <Panel title="Sources" icon={<Layers3 size={18} />}>
+                <DataTable table={payload.sourceBreakdown} emptyLabel="No source breakdown." />
+              </Panel>
+            ) : null}
+            <Panel title="Latest Transactions">
+              <DataTable table={payload.transactions} emptyLabel="No transactions." />
+            </Panel>
+          </div>
+        </>
+      ) : (
+        <EmptyState label="Loading Arbitrum portfolio." />
+      )}
+    </motion.div>
+  );
+}
+
 function InvestmentDashboard({
   kind,
   options,
@@ -551,15 +827,31 @@ function InvestmentDashboard({
   onStartDateChange: (date: string | null) => void;
 }) {
   const optionSet = options[kind];
-  const [mode, setMode] = useState("full");
-  const [selection, setSelection] = useState("");
+  const isStocks = kind === "stocks";
+  const [mode, setMode] = useState("group");
+  const [selection, setSelection] = useState("full");
   const [composition, setComposition] = useState("name");
   const [payload, setPayload] = useState<InvestmentPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const selectionOptions = useMemo(() => groupsForMode(optionSet.assets, mode), [optionSet.assets, mode]);
-  const compositionOptions = optionSet.compositionModes.filter((option) => option.value !== mode);
+  const selectionOptions = useMemo(
+    () => withFullPortfolio(isStocks ? groupsForMode(optionSet.assets, mode) : optionSet.assets),
+    [isStocks, optionSet.assets, mode]
+  );
+  const requestMode = selection === fullPortfolioOption.value ? "full" : isStocks ? mode : "name";
+  const requestSelection = selection === fullPortfolioOption.value ? "" : selection;
+  const selectionReady = selectionOptions.some((option) => option.value === selection);
+  const compositionOptions = optionSet.compositionModes.filter((option) => option.value !== requestMode);
+  const compositionControl =
+    isStocks && requestMode !== "name" ? (
+      <SelectField
+        label="Composition"
+        value={composition}
+        options={compositionOptions}
+        onChange={setComposition}
+      />
+    ) : null;
 
   useEffect(() => {
     setSelection(optionValue(selectionOptions, selection));
@@ -570,7 +862,17 @@ function InvestmentDashboard({
   }, [compositionOptions, composition]);
 
   useEffect(() => {
-    const params = new URLSearchParams({ date, fromDate, mode, selection, composition });
+    if (!selectionReady) {
+      return;
+    }
+
+    const params = new URLSearchParams({
+      date,
+      fromDate,
+      mode: requestMode,
+      selection: requestSelection,
+      composition
+    });
     setLoading(true);
     setError("");
     const load = kind === "stocks" ? fetchStocks : fetchNexo;
@@ -578,11 +880,11 @@ function InvestmentDashboard({
       .then(setPayload)
       .catch((reason: Error) => setError(reason.message))
       .finally(() => setLoading(false));
-  }, [kind, date, fromDate, mode, selection, composition]);
+  }, [kind, date, fromDate, requestMode, requestSelection, composition, selectionReady]);
 
   useEffect(() => {
     onStartDateChange(null);
-  }, [kind, mode, selection, onStartDateChange]);
+  }, [kind, requestMode, requestSelection, onStartDateChange]);
 
   useEffect(() => {
     if (payload?.startDate) {
@@ -604,19 +906,20 @@ function InvestmentDashboard({
         <PeriodSelector value={period} onChange={onPeriodChange} />
       </section>
 
-      <section className="filterRail">
+      <section className="filterRail compactRail">
         <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
         <DateField label="To date" value={date} onChange={onAsOfDateChange} />
-        <SelectField label="Analysis" value={mode} options={optionSet.analysisModes} onChange={setMode} />
-        <SelectField label="Selection" value={selection} options={selectionOptions} disabled={mode === "full"} onChange={setSelection} />
-        <SelectField label="Composition" value={composition} options={compositionOptions} disabled={mode === "name"} onChange={setComposition} />
+        {isStocks ? (
+          <SelectField label="Analysis" value={mode} options={optionSet.analysisModes} onChange={setMode} />
+        ) : null}
+        <SelectField label="Selection" value={selection} options={selectionOptions} onChange={setSelection} />
       </section>
 
       {error ? <div className="warning">{error}</div> : null}
       {payload ? (
         <>
           <MetricStrip metrics={payload.summary.metrics} />
-          <InvestmentCharts payload={payload} />
+          <InvestmentCharts payload={payload} compositionControl={compositionControl} />
           <Panel title="Recent Transactions">
             <DataTable
               table={payload.transactions}
@@ -820,6 +1123,7 @@ export default function App() {
   const [activeStartDate, setActiveStartDate] = useState<string | null>(null);
   const [options, setOptions] = useState<OptionsPayload | null>(null);
   const [error, setError] = useState("");
+  const [stopMessage, setStopMessage] = useState("");
 
   useEffect(() => {
     fetchOptions().then(setOptions).catch((reason: Error) => setError(reason.message));
@@ -875,6 +1179,16 @@ export default function App() {
     [activeStartDate, date]
   );
 
+  function handleStopServer() {
+    const confirmed = window.confirm("Stop the dashboard backend for this checkout?");
+    if (!confirmed) {
+      return;
+    }
+    stopServer()
+      .then(() => setStopMessage("Backend stop requested. The frontend page can stay open, but API data will stop refreshing until the backend is restarted."))
+      .catch((reason: Error) => setStopMessage(reason.message));
+  }
+
   return (
     <main className="appShell">
       <aside className="sidebar">
@@ -896,10 +1210,15 @@ export default function App() {
             );
           })}
         </nav>
+        <button className="serverStop" type="button" onClick={handleStopServer}>
+          <Power size={17} />
+          <span>Stop Backend</span>
+        </button>
       </aside>
       <section className="mainStage">
         <div className="ambientGrid" />
         {error ? <div className="warning">{error}</div> : null}
+        {stopMessage ? <div className="warning">{stopMessage}</div> : null}
         {options ? (
           <AnimatePresence mode="wait">
             <motion.div key={active} initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.985 }} transition={{ duration: 0.18 }}>
@@ -919,6 +1238,18 @@ export default function App() {
               {active === "nexo" ? (
                 <InvestmentDashboard
                   kind="nexo"
+                  options={options}
+                  date={date}
+                  fromDate={fromDate}
+                  period={period}
+                  onAsOfDateChange={handleAsOfDateChange}
+                  onFromDateChange={handleFromDateChange}
+                  onPeriodChange={handlePeriodChange}
+                  onStartDateChange={setActiveStartDate}
+                />
+              ) : null}
+              {active === "arbitrum" ? (
+                <ArbitrumDashboard
                   options={options}
                   date={date}
                   fromDate={fromDate}

@@ -6,6 +6,14 @@ from typing import Any
 
 import pandas as pd
 
+from dashboard.data_handling.arbitrum_artifacts import (
+    ArbitrumDashboardArtifacts,
+    filter_selection,
+    latest_rows_as_of,
+    load_arbitrum_dashboard_artifacts,
+    rows_through_date,
+    selection_key,
+)
 from dashboard.data_handling.nexo_data import (
     get_nexo_start_date,
     list_nexo_coins,
@@ -30,8 +38,10 @@ from dashboard.data_handling.transaction_data import (
     load_recent_stock_transactions,
 )
 from file_paths import CURRENCY_METADATA, STOCK_METADATA
+from historical_transactions.portfolio_snapshots import get_forex_rate
 
 PAGE_SIZE = 5
+ARBITRUM_CHAIN = "arbitrum"
 
 
 @dataclass(frozen=True)
@@ -41,7 +51,6 @@ class ModeOption:
 
 
 STOCK_ANALYSIS_MODES = [
-    ModeOption("Full Portfolio", "full"),
     ModeOption("Asset Group", "group"),
     ModeOption("Region", "region"),
     ModeOption("Provider", "provider"),
@@ -54,15 +63,24 @@ STOCK_COMPOSITION_MODES = [
     ModeOption("Provider", "provider"),
 ]
 NEXO_ANALYSIS_MODES = [
-    ModeOption("Full Portfolio", "full"),
-    ModeOption("Asset Group", "group"),
-    ModeOption("Currency", "currency"),
     ModeOption("Single Asset", "name"),
 ]
 NEXO_COMPOSITION_MODES = [
     ModeOption("Asset Name", "name"),
     ModeOption("Asset Group", "group"),
     ModeOption("Currency", "currency"),
+]
+ARBITRUM_ANALYSIS_MODES = [
+    ModeOption("Single Asset", "name"),
+]
+ARBITRUM_COMPOSITION_MODES = [
+    ModeOption("Asset Name", "name"),
+    ModeOption("Valuation Route", "route"),
+    ModeOption("Exposure Type", "exposure"),
+]
+ARBITRUM_CURRENCY_OPTIONS = [
+    ModeOption("EUR", "EUR"),
+    ModeOption("USD", "USD"),
 ]
 
 
@@ -97,9 +115,62 @@ def _safe_frame(load_fn, *args, **kwargs) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _currency(value: float) -> str:
+def _currency(value: float, currency: str = "EUR") -> str:
     decimals = 0 if abs(value) > 100 else 2
-    return f"EUR {value:,.{decimals}f}"
+    return f"{currency} {value:,.{decimals}f}"
+
+
+def _normalize_dashboard_currency(currency: str) -> str:
+    normalized = str(currency or "EUR").upper()
+    if normalized == "USD":
+        return "USD"
+    return "EUR"
+
+
+def _convert_eur_value(
+    value: Any,
+    *,
+    currency: str,
+    date_value: Any,
+) -> float | None:
+    if pd.isna(value):
+        return None
+
+    value_float = float(value)
+    if currency == "EUR":
+        return value_float
+
+    date_ts = pd.to_datetime(date_value, errors="coerce")
+    if pd.isna(date_ts):
+        return value_float
+
+    eur_per_usd = float(get_forex_rate(currency="USD", date=date_ts.strftime("%Y-%m-%d")))
+    return value_float / eur_per_usd
+
+
+def _convert_eur_columns(
+    frame: pd.DataFrame,
+    *,
+    currency: str,
+    columns: list[str],
+    fallback_date: str | pd.Timestamp,
+) -> pd.DataFrame:
+    if frame.empty or currency == "EUR":
+        return frame.copy()
+
+    converted = frame.copy()
+    if "Date" in converted.columns:
+        dates = converted["Date"]
+    else:
+        dates = pd.Series(fallback_date, index=converted.index)
+    for column in columns:
+        if column not in converted.columns:
+            continue
+        converted[column] = [
+            _convert_eur_value(value, currency=currency, date_value=date_value)
+            for value, date_value in zip(converted[column], dates, strict=True)
+        ]
+    return converted
 
 
 def _date_window(*, selected_date: str, from_date: str) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -159,6 +230,17 @@ def _resolve_nexo_coins(*, selection: str, mode: str) -> list[str]:
     return [coin for coin in coins if _nexo_metadata_value(coin=coin, mode=mode) == selection]
 
 
+def _arbitrum_asset_options() -> list[dict[str, str]]:
+    artifacts = load_arbitrum_dashboard_artifacts(chain=ARBITRUM_CHAIN)
+    if artifacts.assets.empty:
+        return []
+    return [
+        {"label": row["Label"], "value": row["Value"]}
+        for _, row in artifacts.assets.sort_values("Label").iterrows()
+        if str(row["Value"]).strip()
+    ]
+
+
 def build_options_payload() -> dict[str, Any]:
     stock_assets = [
         {
@@ -189,6 +271,12 @@ def build_options_payload() -> dict[str, Any]:
             "analysisModes": _mode_options(NEXO_ANALYSIS_MODES),
             "compositionModes": _mode_options(NEXO_COMPOSITION_MODES),
             "assets": nexo_coins,
+        },
+        "arbitrum": {
+            "analysisModes": _mode_options(ARBITRUM_ANALYSIS_MODES),
+            "compositionModes": _mode_options(ARBITRUM_COMPOSITION_MODES),
+            "assets": _arbitrum_asset_options(),
+            "currencies": _mode_options(ARBITRUM_CURRENCY_OPTIONS),
         },
         "realEstate": {
             "assets": [{"label": "All Assets", "value": "ALL"}]
@@ -539,6 +627,368 @@ def build_nexo_payload(
             tx,
             columns=["Date", "Type", "Input", "Output", "USD Equivalent", "Details"],
         ),
+    }
+
+
+def _arbitrum_selected_asset(*, mode: str, selection: str) -> str:
+    if mode == "name" and selection:
+        return selection
+    return "ALL"
+
+
+def _arbitrum_title(*, mode: str, selection: str) -> str:
+    if mode == "name" and selection:
+        return f"Arbitrum: {selection}"
+    return "Arbitrum Portfolio"
+
+
+def _arbitrum_start_date(
+    *, artifacts: ArbitrumDashboardArtifacts, selected_asset: str
+) -> str | None:
+    frame = filter_selection(artifacts.timeseries_daily, selected_asset)
+    if frame.empty or "Date" not in frame.columns:
+        return None
+
+    dates = pd.to_datetime(frame["Date"], errors="coerce").dropna()
+    if dates.empty:
+        return None
+    return dates.min().strftime("%Y-%m-%d")
+
+
+def _limit_daily_frame(frame: pd.DataFrame, *, selected_date: str) -> pd.DataFrame:
+    if frame.empty or "Date" not in frame.columns:
+        return frame.copy()
+
+    limited = frame.copy()
+    limited["Date"] = pd.to_datetime(limited["Date"], errors="coerce").dt.normalize()
+    limited = limited.dropna(subset=["Date"])
+    return limited[limited["Date"] <= pd.Timestamp(selected_date).normalize()].copy()
+
+
+def _latest_rows_as_of(frame: pd.DataFrame, *, selected_date: str) -> pd.DataFrame:
+    if frame.empty or "Date" not in frame.columns:
+        return frame.copy()
+
+    dated = _limit_daily_frame(frame=frame, selected_date=selected_date)
+    if dated.empty:
+        return dated
+
+    latest_date = dated["Date"].max()
+    return dated[dated["Date"] == latest_date].copy()
+
+
+def _artifact_value_history(
+    *,
+    artifacts: ArbitrumDashboardArtifacts,
+    selected_asset: str,
+    selected_date: str,
+    currency: str,
+) -> pd.DataFrame:
+    frame = filter_selection(artifacts.timeseries_daily, selected_asset)
+    frame = rows_through_date(frame=frame, selected_date=selected_date)
+    if frame.empty:
+        return pd.DataFrame(
+            columns=["Date", "Market Value", "Invested Capital", "Profit/Loss", "Quantity"]
+        )
+
+    converted = _convert_eur_columns(
+        frame,
+        currency=currency,
+        columns=["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
+        fallback_date=selected_date,
+    )
+    converted = converted.rename(
+        columns={
+            "MarketValueEUR": "Market Value",
+            "PrincipalInvestedEUR": "Invested Capital",
+            "ProfitLossEUR": "Profit/Loss",
+        }
+    )
+    return converted[["Date", "Market Value", "Invested Capital", "Profit/Loss", "Quantity"]]
+
+
+def _artifact_summary(
+    *,
+    history: pd.DataFrame,
+    artifacts: ArbitrumDashboardArtifacts,
+    selected_asset: str,
+    selected_date: str,
+    title: str,
+    currency: str,
+) -> dict[str, Any]:
+    latest = _latest_rows_as_of(frame=history, selected_date=selected_date)
+    if latest.empty:
+        current_value = 0.0
+        net_invested = 0.0
+        profit_loss = 0.0
+    else:
+        row = latest.iloc[-1]
+        current_value = float(row.get("Market Value", 0.0) or 0.0)
+        net_invested = float(row.get("Invested Capital", 0.0) or 0.0)
+        profit_loss = float(row.get("Profit/Loss", 0.0) or 0.0)
+
+    tx_rows = _artifact_transactions(
+        artifacts=artifacts,
+        selected_asset=selected_asset,
+        selected_date=selected_date,
+        max_rows=None,
+    )
+
+    return {
+        "title": title,
+        "empty": latest.empty,
+        "currentValue": current_value,
+        "profitLoss": profit_loss,
+        "metrics": [
+            {
+                "label": "Current Value",
+                "value": current_value,
+                "display": _currency(current_value, currency),
+            },
+            {
+                "label": "Net P/L",
+                "value": profit_loss,
+                "display": _currency(profit_loss, currency),
+            },
+            {
+                "label": "Net Invested",
+                "value": net_invested,
+                "display": _currency(net_invested, currency),
+            },
+            {
+                "label": "Transactions",
+                "value": len(tx_rows),
+                "display": f"{len(tx_rows):,}",
+            },
+        ],
+    }
+
+
+def _artifact_transactions(
+    *,
+    artifacts: ArbitrumDashboardArtifacts,
+    selected_asset: str,
+    selected_date: str,
+    max_rows: int | None,
+) -> pd.DataFrame:
+    frame = artifacts.transactions_dashboard.copy()
+    columns = [
+        "Date",
+        "Type",
+        "Token in",
+        "Qty in",
+        "Token out",
+        "Qty out",
+        "Fee",
+        "Fee Token",
+        "TX Hash",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    selected = selection_key(selected_asset)
+    if selected != "ALL":
+        frame = frame[
+            frame["AssetKeys"]
+            .fillna("")
+            .astype(str)
+            .str.split(";")
+            .map(lambda keys: selected in keys)
+        ].copy()
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    frame = frame.dropna(subset=["Date"])
+    frame = frame[frame["Date"].dt.normalize() <= pd.Timestamp(selected_date).normalize()]
+    frame = frame.sort_values("Date", ascending=False)
+    if max_rows is not None:
+        frame = frame.head(max_rows)
+    frame["Date"] = frame["Date"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    return frame[[column for column in columns if column in frame.columns]].reset_index(drop=True)
+
+
+def _artifact_composition(
+    *,
+    artifacts: ArbitrumDashboardArtifacts,
+    selected_asset: str,
+    selected_date: str,
+    composition: str,
+    currency: str,
+) -> dict[str, Any]:
+    frame = filter_selection(artifacts.composition_daily, selected_asset)
+    frame = frame[frame["CompositionMode"].fillna("").astype(str) == composition].copy()
+    frame = latest_rows_as_of(frame=frame, selected_date=selected_date)
+    if frame.empty:
+        return {"kind": "empty", "items": []}
+
+    converted = _convert_eur_columns(
+        frame,
+        currency=currency,
+        columns=["ValueEUR"],
+        fallback_date=selected_date,
+    )
+    grouped = (
+        converted.rename(columns={"Label": "label", "ValueEUR": "value"})
+        .groupby("label", as_index=False)["value"]
+        .sum()
+        .sort_values("value", ascending=False)
+        .head(12)
+    )
+    grouped["value"] = pd.to_numeric(grouped["value"], errors="coerce").fillna(0.0)
+    grouped = grouped[grouped["value"].abs() > 0]
+    if grouped.empty:
+        return {"kind": "empty", "items": []}
+    return {"kind": "breakdown", "items": _records(grouped)}
+
+
+def _artifact_source_breakdown(
+    *,
+    artifacts: ArbitrumDashboardArtifacts,
+    selected_asset: str,
+    selected_date: str,
+    currency: str,
+) -> pd.DataFrame:
+    if selection_key(selected_asset) == "ALL":
+        return pd.DataFrame()
+
+    frame = filter_selection(artifacts.source_daily, selected_asset)
+    frame = latest_rows_as_of(frame=frame, selected_date=selected_date)
+    if frame.empty:
+        return pd.DataFrame()
+
+    converted = _convert_eur_columns(
+        frame,
+        currency=currency,
+        columns=["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
+        fallback_date=selected_date,
+    ).rename(
+        columns={
+            "MarketValueEUR": "Market Value",
+            "PrincipalInvestedEUR": "Invested Capital",
+            "ProfitLossEUR": "Profit/Loss",
+            "ValuationRoute": "Valuation Route",
+        }
+    )
+    converted["_abs_value"] = (
+        pd.to_numeric(
+            converted["Market Value"],
+            errors="coerce",
+        )
+        .abs()
+        .fillna(0.0)
+    )
+    converted = converted.sort_values("_abs_value", ascending=False).head(25)
+    return converted
+
+
+def build_arbitrum_payload(
+    *,
+    selected_date: str,
+    from_date: str | None = None,
+    mode: str = "full",
+    selection: str = "",
+    composition: str = "name",
+    currency: str = "EUR",
+) -> dict[str, Any]:
+    if from_date:
+        from_date, selected_date = _date_window_strings(
+            selected_date=selected_date,
+            from_date=from_date,
+        )
+    else:
+        _, selected_date = _date_window_strings(
+            selected_date=selected_date,
+            from_date=selected_date,
+        )
+
+    artifacts = load_arbitrum_dashboard_artifacts(chain=ARBITRUM_CHAIN)
+    selected_currency = _normalize_dashboard_currency(currency)
+    selected_asset = _arbitrum_selected_asset(mode=mode, selection=selection)
+    title = _arbitrum_title(mode=mode, selection=selection)
+    start_date = _arbitrum_start_date(artifacts=artifacts, selected_asset=selected_asset)
+    history = _artifact_value_history(
+        artifacts=artifacts,
+        selected_asset=selected_asset,
+        selected_date=selected_date,
+        currency=selected_currency,
+    )
+    tx_daily_source = rows_through_date(
+        frame=filter_selection(artifacts.timeseries_daily, selected_asset),
+        selected_date=selected_date,
+    )
+    if from_date:
+        history = _filter_period_rows(
+            history,
+            from_date=from_date,
+            selected_date=selected_date,
+        )
+        tx_daily_source = _filter_period_rows(
+            tx_daily_source,
+            from_date=from_date,
+            selected_date=selected_date,
+        )
+    tx_daily = tx_daily_source[["Date", "TxCount"]].rename(columns={"TxCount": "Tx Count"})
+    source_breakdown = _artifact_source_breakdown(
+        artifacts=artifacts,
+        selected_asset=selected_asset,
+        selected_date=selected_date,
+        currency=selected_currency,
+    )
+    latest_tx = _artifact_transactions(
+        artifacts=artifacts,
+        selected_asset=selected_asset,
+        selected_date=selected_date,
+        max_rows=25,
+    )
+
+    return {
+        "title": title,
+        "fromDate": from_date or start_date or selected_date,
+        "startDate": start_date or selected_date,
+        "currency": selected_currency,
+        "mode": mode,
+        "selection": selected_asset,
+        "summary": _artifact_summary(
+            history=history,
+            artifacts=artifacts,
+            selected_asset=selected_asset,
+            selected_date=selected_date,
+            title=title,
+            currency=selected_currency,
+        ),
+        "transactionsDaily": _records(tx_daily),
+        "valueHistory": _records(history),
+        "composition": _artifact_composition(
+            artifacts=artifacts,
+            selected_asset=selected_asset,
+            selected_date=selected_date,
+            composition=composition,
+            currency=selected_currency,
+        ),
+        "sourceBreakdown": _table_payload(
+            source_breakdown,
+            columns=[
+                "Source",
+                "Quantity",
+                "Market Value",
+                "Invested Capital",
+                "Profit/Loss",
+                "Valuation Route",
+            ],
+        ),
+        "transactions": _table_payload(
+            latest_tx,
+            columns=[
+                "Date",
+                "Type",
+                "Token in",
+                "Qty in",
+                "Token out",
+                "Qty out",
+                "Fee",
+                "Fee Token",
+                "TX Hash",
+            ],
+        ),
+        "warnings": artifacts.errors,
     }
 
 

@@ -82,7 +82,8 @@ nav {
   gap: 8px;
 }
 
-nav button {
+nav button,
+.serverStop {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -102,6 +103,19 @@ nav button.active {
   border-color: rgba(45, 242, 201, 0.2);
   background: rgba(45, 242, 201, 0.08);
   box-shadow: inset 3px 0 0 #2df2c9;
+}
+
+.serverStop {
+  margin-top: 18px;
+  color: #f6d45d;
+  border-color: rgba(246, 212, 93, 0.18);
+  background: rgba(246, 212, 93, 0.05);
+}
+
+.serverStop:hover {
+  color: #fff3bf;
+  border-color: rgba(246, 212, 93, 0.35);
+  background: rgba(246, 212, 93, 0.1);
 }
 
 .mainStage {
@@ -195,6 +209,14 @@ h2 {
   padding: 14px;
 }
 
+.arbitrumRail {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+}
+
+.compactRail {
+  align-items: end;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -276,6 +298,43 @@ h2 {
   background: rgba(45, 242, 201, 0.1);
 }
 
+.segmentedControl {
+  display: grid;
+  gap: 7px;
+}
+
+.segmentedControl > span {
+  color: #7d8b9f;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.segmentButtons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: 44px;
+  padding: 3px;
+  border: 1px solid rgba(232, 255, 248, 0.12);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.segmentButtons button {
+  color: #9eacb9;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition: 160ms ease;
+}
+
+.segmentButtons button:hover,
+.segmentButtons button.active {
+  color: #061112;
+  background: #2df2c9;
+}
+
 .metricStrip {
   display: grid;
   grid-template-columns: repeat(6, minmax(120px, 1fr));
@@ -313,6 +372,21 @@ h2 {
   color: #ff6b91;
 }
 
+.metric.status-ok strong,
+.statusText.status-ok {
+  color: #b7ff5a;
+}
+
+.metric.status-warn strong,
+.statusText.status-warn {
+  color: #f6d45d;
+}
+
+.metric.status-crit strong,
+.statusText.status-crit {
+  color: #ff6b91;
+}
+
 .chartGrid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
@@ -332,13 +406,59 @@ h2 {
 .panelTitle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 9px;
   margin-bottom: 16px;
   color: #e8fff8;
 }
 
+.panelTitleMain {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
 .panelTitle svg {
   color: #2df2c9;
+}
+
+.panelAction {
+  min-width: 190px;
+}
+
+.panelAction .field {
+  gap: 5px;
+}
+
+.panelAction .field select {
+  height: 38px;
+}
+
+.healthGrid {
+  align-items: stretch;
+}
+
+.dateFacts {
+  display: grid;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 12px;
+  align-content: center;
+  border: 1px solid rgba(232, 255, 248, 0.1);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.dateFacts span {
+  color: #7d8b9f;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dateFacts strong {
+  color: #e8fff8;
+  font-size: 14px;
 }
 
 .compositionWrap {
@@ -458,7 +578,7 @@ tr:hover td {
   }
 
   nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     flex: 1;
   }
 
@@ -478,6 +598,7 @@ tr:hover td {
   .tableStack {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 720px) {

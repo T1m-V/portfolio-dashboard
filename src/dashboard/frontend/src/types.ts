@@ -11,6 +11,7 @@ export type Metric = {
   label: string;
   value: number;
   display: string;
+  status?: "OK" | "WARN" | "CRIT" | string;
 };
 
 export type TablePayload = {
@@ -66,6 +67,28 @@ export type RealEstatePayload = {
   warnings: string[];
 };
 
+export type ArbitrumPayload = {
+  title: string;
+  fromDate: string;
+  startDate: string;
+  currency: "EUR" | "USD" | string;
+  mode: "full" | "name" | string;
+  selection: string;
+  summary: {
+    title: string;
+    empty?: boolean;
+    currentValue?: number;
+    profitLoss?: number;
+    metrics: Metric[];
+  };
+  transactionsDaily: Record<string, string | number | null>[];
+  valueHistory: Record<string, string | number | null>[];
+  composition: CompositionPayload;
+  sourceBreakdown: TablePayload;
+  transactions: TablePayload;
+  warnings: string[];
+};
+
 export type OptionsPayload = {
   stocks: {
     analysisModes: Option[];
@@ -76,6 +99,12 @@ export type OptionsPayload = {
     analysisModes: Option[];
     compositionModes: Option[];
     assets: Option[];
+  };
+  arbitrum: {
+    analysisModes: Option[];
+    compositionModes: Option[];
+    assets: Option[];
+    currencies: Option[];
   };
   realEstate: {
     assets: Option[];

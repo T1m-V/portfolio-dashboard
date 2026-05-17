@@ -5,7 +5,84 @@ from fastapi.testclient import TestClient
 
 import dashboard.main as main
 import dashboard.services as services
+from dashboard.data_handling.arbitrum_artifacts import ArbitrumDashboardArtifacts
 from dashboard.data_handling.real_estate_data import RealEstateDataBundle
+
+
+def _build_arbitrum_artifacts(
+    *,
+    asset_daily: pd.DataFrame | None = None,
+    timeseries_daily: pd.DataFrame | None = None,
+    composition_daily: pd.DataFrame | None = None,
+    source_daily: pd.DataFrame | None = None,
+    transactions_dashboard: pd.DataFrame | None = None,
+    assets: pd.DataFrame | None = None,
+    errors: list[str] | None = None,
+) -> ArbitrumDashboardArtifacts:
+    return ArbitrumDashboardArtifacts(
+        asset_daily=asset_daily if asset_daily is not None else pd.DataFrame(columns=["Date"]),
+        timeseries_daily=(
+            timeseries_daily
+            if timeseries_daily is not None
+            else pd.DataFrame(
+                columns=[
+                    "Date",
+                    "Selection",
+                    "MarketValueEUR",
+                    "PrincipalInvestedEUR",
+                    "ProfitLossEUR",
+                    "Quantity",
+                    "TxCount",
+                ]
+            )
+        ),
+        composition_daily=(
+            composition_daily
+            if composition_daily is not None
+            else pd.DataFrame(columns=["Date", "Selection", "CompositionMode", "Label", "ValueEUR"])
+        ),
+        source_daily=(
+            source_daily
+            if source_daily is not None
+            else pd.DataFrame(
+                columns=[
+                    "Date",
+                    "Selection",
+                    "Source",
+                    "Coin",
+                    "Quantity",
+                    "MarketValueEUR",
+                    "PrincipalInvestedEUR",
+                    "ProfitLossEUR",
+                    "ValuationRoute",
+                    "HasDirectExposure",
+                    "HasProtocolExposure",
+                    "HasAaveExposure",
+                    "IsMaterial",
+                ]
+            )
+        ),
+        transactions_dashboard=(
+            transactions_dashboard
+            if transactions_dashboard is not None
+            else pd.DataFrame(
+                columns=[
+                    "Date",
+                    "Type",
+                    "Token in",
+                    "Qty in",
+                    "Token out",
+                    "Qty out",
+                    "Fee",
+                    "Fee Token",
+                    "TX Hash",
+                    "AssetKeys",
+                ]
+            )
+        ),
+        assets=assets if assets is not None else pd.DataFrame(columns=["Label", "Value"]),
+        errors=errors if errors is not None else [],
+    )
 
 
 def test_stock_payload_preserves_investment_metrics(monkeypatch) -> None:
@@ -100,6 +177,281 @@ def test_nexo_payload_formats_recent_transaction_columns(monkeypatch) -> None:
     assert payload["summary"]["profitLoss"] == 3.0
     assert payload["transactions"]["rows"][0]["Input"] == "-1 USDT"
     assert payload["transactions"]["rows"][0]["Output"] == "0.1 BTC"
+
+
+def test_arbitrum_payload_defaults_to_eur_and_converts_usd(monkeypatch) -> None:
+    artifacts = _build_arbitrum_artifacts(
+        timeseries_daily=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01")],
+                "Selection": ["ALL"],
+                "MarketValueEUR": [100.0],
+                "PrincipalInvestedEUR": [80.0],
+                "ProfitLossEUR": [20.0],
+                "Quantity": [2.0],
+                "TxCount": [1],
+            }
+        ),
+        composition_daily=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01")],
+                "Selection": ["ALL"],
+                "CompositionMode": ["name"],
+                "Label": ["ETH"],
+                "ValueEUR": [100.0],
+            }
+        ),
+        transactions_dashboard=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01 10:00:00")],
+                "Type": ["Receive"],
+                "Token in": ["ETH"],
+                "Qty in": ["2"],
+                "Token out": [""],
+                "Qty out": [""],
+                "Fee": [""],
+                "Fee Token": ["ETH"],
+                "TX Hash": ["h1"],
+                "AssetKeys": ["ALL;ETH"],
+            }
+        ),
+    )
+    monkeypatch.setattr(services, "load_arbitrum_dashboard_artifacts", lambda **_: artifacts)
+    monkeypatch.setattr(services, "get_forex_rate", lambda **_: 0.5)
+
+    eur_payload = services.build_arbitrum_payload(selected_date="2026-01-01")
+    usd_payload = services.build_arbitrum_payload(
+        selected_date="2026-01-01",
+        currency="USD",
+    )
+
+    eur_metrics = {item["label"]: item for item in eur_payload["summary"]["metrics"]}
+    usd_metrics = {item["label"]: item for item in usd_payload["summary"]["metrics"]}
+    assert eur_metrics["Current Value"]["value"] == 100.0
+    assert eur_metrics["Net Invested"]["value"] == 80.0
+    assert eur_metrics["Net P/L"]["value"] == 20.0
+    assert eur_metrics["Current Value"]["display"] == "EUR 100.00"
+
+    assert usd_payload["currency"] == "USD"
+    assert usd_metrics["Current Value"]["value"] == 200.0
+    assert usd_metrics["Net Invested"]["value"] == 160.0
+    assert usd_metrics["Net P/L"]["value"] == 40.0
+    assert usd_metrics["Current Value"]["display"] == "USD 200"
+    assert usd_payload["valueHistory"][0]["Market Value"] == 200.0
+    assert usd_payload["composition"]["items"][0]["value"] == 200.0
+
+
+def test_arbitrum_payload_filters_value_history_by_from_date(monkeypatch) -> None:
+    artifacts = _build_arbitrum_artifacts(
+        timeseries_daily=pd.DataFrame(
+            {
+                "Date": [
+                    pd.Timestamp("2026-01-01"),
+                    pd.Timestamp("2026-01-02"),
+                    pd.Timestamp("2026-01-03"),
+                ],
+                "Selection": ["ALL", "ALL", "ALL"],
+                "MarketValueEUR": [100.0, 120.0, 150.0],
+                "PrincipalInvestedEUR": [80.0, 90.0, 110.0],
+                "ProfitLossEUR": [20.0, 30.0, 40.0],
+                "Quantity": [1.0, 1.2, 1.5],
+                "TxCount": [1, 2, 3],
+            }
+        ),
+    )
+    monkeypatch.setattr(services, "load_arbitrum_dashboard_artifacts", lambda **_: artifacts)
+
+    payload = services.build_arbitrum_payload(
+        selected_date="2026-01-03",
+        from_date="2026-01-02",
+    )
+
+    assert payload["fromDate"] == "2026-01-02"
+    assert payload["startDate"] == "2026-01-01"
+    assert [row["Date"] for row in payload["valueHistory"]] == ["2026-01-02", "2026-01-03"]
+    assert [row["Date"] for row in payload["transactionsDaily"]] == ["2026-01-02", "2026-01-03"]
+
+
+def test_arbitrum_payload_single_asset_filters_metrics_history_and_tables(monkeypatch) -> None:
+    artifacts = _build_arbitrum_artifacts(
+        timeseries_daily=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-01")],
+                "Selection": ["ETH", "BTC"],
+                "MarketValueEUR": [100.0, 200.0],
+                "PrincipalInvestedEUR": [80.0, 150.0],
+                "ProfitLossEUR": [20.0, 50.0],
+                "Quantity": [2.0, 1.0],
+                "TxCount": [1, 1],
+            }
+        ),
+        composition_daily=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-01")],
+                "Selection": ["ETH", "BTC"],
+                "CompositionMode": ["name", "name"],
+                "Label": ["ETH", "BTC"],
+                "ValueEUR": [100.0, 200.0],
+            }
+        ),
+        transactions_dashboard=pd.DataFrame(
+            {
+                "Date": [
+                    pd.Timestamp("2026-01-01 10:00:00"),
+                    pd.Timestamp("2026-01-01 11:00:00"),
+                ],
+                "Type": ["Receive", "Receive"],
+                "Token in": ["ETH", "BTC"],
+                "Qty in": ["2", "1"],
+                "Token out": ["", ""],
+                "Qty out": ["", ""],
+                "Fee": ["", ""],
+                "Fee Token": ["ETH", "BTC"],
+                "TX Hash": ["eth-hash", "btc-hash"],
+                "AssetKeys": ["ALL;ETH", "ALL;BTC"],
+            }
+        ),
+        source_daily=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-01-01")],
+                "Selection": ["ETH", "BTC"],
+                "Source": ["WETH", "WBTC"],
+                "Coin": ["ETH", "BTC"],
+                "Quantity": [2.0, 1.0],
+                "MarketValueEUR": [100.0, 200.0],
+                "PrincipalInvestedEUR": [80.0, 150.0],
+                "ProfitLossEUR": [20.0, 50.0],
+                "ValuationRoute": ["DIRECT", "DIRECT"],
+                "HasDirectExposure": [True, True],
+                "HasProtocolExposure": [False, False],
+                "HasAaveExposure": [False, False],
+                "IsMaterial": [True, True],
+            }
+        ),
+    )
+    monkeypatch.setattr(services, "load_arbitrum_dashboard_artifacts", lambda **_: artifacts)
+    monkeypatch.setattr(services, "get_forex_rate", lambda **_: 0.5)
+
+    payload = services.build_arbitrum_payload(
+        selected_date="2026-01-01",
+        mode="name",
+        selection="ETH",
+    )
+    usd_payload = services.build_arbitrum_payload(
+        selected_date="2026-01-01",
+        mode="name",
+        selection="ETH",
+        currency="USD",
+    )
+
+    metrics = {item["label"]: item["value"] for item in payload["summary"]["metrics"]}
+    assert payload["title"] == "Arbitrum: ETH"
+    assert metrics["Current Value"] == 100.0
+    assert metrics["Net Invested"] == 80.0
+    assert metrics["Transactions"] == 1
+    assert payload["valueHistory"][0]["Quantity"] == 2.0
+    assert payload["composition"]["items"] == [{"label": "ETH", "value": 100.0}]
+    assert [row["TX Hash"] for row in payload["transactions"]["rows"]] == ["eth-hash"]
+    assert payload["sourceBreakdown"]["rows"] == [
+        {
+            "Source": "WETH",
+            "Quantity": 2.0,
+            "Market Value": 100.0,
+            "Invested Capital": 80.0,
+            "Profit/Loss": 20.0,
+            "Valuation Route": "DIRECT",
+        }
+    ]
+    assert usd_payload["sourceBreakdown"]["rows"][0]["Market Value"] == 200.0
+    assert "exceptions" not in payload
+    assert "missingPrices" not in payload
+
+
+def test_arbitrum_payload_supports_route_and_exposure_composition(monkeypatch) -> None:
+    artifacts = _build_arbitrum_artifacts(
+        timeseries_daily=pd.DataFrame(
+            {
+                "Date": [pd.Timestamp("2026-01-01")],
+                "Selection": ["ALL"],
+                "MarketValueEUR": [175.0],
+                "PrincipalInvestedEUR": [0.0],
+                "ProfitLossEUR": [175.0],
+                "Quantity": [27.0],
+                "TxCount": [0],
+            }
+        ),
+        composition_daily=pd.DataFrame(
+            {
+                "Date": [
+                    pd.Timestamp("2026-01-01"),
+                    pd.Timestamp("2026-01-01"),
+                    pd.Timestamp("2026-01-01"),
+                    pd.Timestamp("2026-01-01"),
+                    pd.Timestamp("2026-01-01"),
+                ],
+                "Selection": ["ALL", "ALL", "ALL", "ALL", "ALL"],
+                "CompositionMode": ["route", "route", "exposure", "exposure", "exposure"],
+                "Label": [
+                    "DIRECT",
+                    "PROTOCOL_DERIVED",
+                    "Direct Exposure",
+                    "Protocol Exposure",
+                    "Mixed Exposure",
+                ],
+                "ValueEUR": [125.0, 50.0, 100.0, 50.0, 25.0],
+            }
+        ),
+    )
+    monkeypatch.setattr(services, "load_arbitrum_dashboard_artifacts", lambda **_: artifacts)
+
+    route_payload = services.build_arbitrum_payload(
+        selected_date="2026-01-01",
+        composition="route",
+    )
+    exposure_payload = services.build_arbitrum_payload(
+        selected_date="2026-01-01",
+        composition="exposure",
+    )
+
+    route_items = {item["label"]: item["value"] for item in route_payload["composition"]["items"]}
+    exposure_items = {
+        item["label"]: item["value"] for item in exposure_payload["composition"]["items"]
+    }
+    assert route_items == {"DIRECT": 125.0, "PROTOCOL_DERIVED": 50.0}
+    assert exposure_items == {
+        "Direct Exposure": 100.0,
+        "Protocol Exposure": 50.0,
+        "Mixed Exposure": 25.0,
+    }
+
+
+def test_options_do_not_expose_full_portfolio_as_analysis(monkeypatch) -> None:
+    artifacts = _build_arbitrum_artifacts(
+        assets=pd.DataFrame({"Label": ["ETH"], "Value": ["ETH"]}),
+    )
+    monkeypatch.setattr(services, "load_arbitrum_dashboard_artifacts", lambda **_: artifacts)
+
+    payload = services.build_options_payload()
+
+    assert all(option["value"] != "full" for option in payload["stocks"]["analysisModes"])
+    assert payload["nexo"]["analysisModes"] == [
+        {"label": "Single Asset", "value": "name"},
+    ]
+    assert payload["arbitrum"]["analysisModes"] == [
+        {"label": "Single Asset", "value": "name"},
+    ]
+    assert payload["arbitrum"]["assets"] == [{"label": "ETH", "value": "ETH"}]
+
+
+def test_arbitrum_payload_warns_when_artifacts_are_missing(monkeypatch) -> None:
+    artifacts = _build_arbitrum_artifacts(errors=["missing artifact asset_daily.csv"])
+    monkeypatch.setattr(services, "load_arbitrum_dashboard_artifacts", lambda **_: artifacts)
+
+    payload = services.build_arbitrum_payload(selected_date="2026-01-01")
+
+    assert payload["warnings"] == ["missing artifact asset_daily.csv"]
+    assert payload["summary"]["empty"] is True
+    assert payload["valueHistory"] == []
 
 
 def test_real_estate_payload_handles_empty_frames_and_warnings(monkeypatch) -> None:
@@ -353,3 +705,43 @@ def test_real_estate_period_metrics_and_rebased_pl(monkeypatch) -> None:
     assert payload["plBreakdown"][0]["Total P/L"] == 0.0
     assert payload["outflowBreakdown"]
     assert payload["inflowBreakdown"] == [{"label": "AVOIDED_RENT", "value": 50.0}]
+
+
+def test_arbitrum_api_endpoint_uses_query_contract(monkeypatch) -> None:
+    def fake_payload(**kwargs):
+        assert kwargs == {
+            "selected_date": "2026-01-01",
+            "from_date": "2025-01-01",
+            "mode": "name",
+            "selection": "ETH",
+            "composition": "route",
+            "currency": "USD",
+        }
+        return {"title": "Arbitrum Portfolio"}
+
+    monkeypatch.setattr(main, "build_arbitrum_payload", fake_payload)
+
+    client = TestClient(main.app)
+    response = client.get(
+        "/api/arbitrum?date=2026-01-01&fromDate=2025-01-01&mode=name&selection=ETH&composition=route&currency=USD"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"title": "Arbitrum Portfolio"}
+
+
+def test_stop_server_endpoint_returns_before_shutdown(monkeypatch) -> None:
+    called = False
+
+    def fake_stop() -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(main, "request_server_stop", fake_stop)
+
+    client = TestClient(main.app)
+    response = client.post("/api/server/stop")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "stopping"}
+    assert called is True

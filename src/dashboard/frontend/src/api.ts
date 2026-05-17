@@ -1,4 +1,4 @@
-import type { InvestmentPayload, OptionsPayload, RealEstatePayload } from "./types";
+import type { ArbitrumPayload, InvestmentPayload, OptionsPayload, RealEstatePayload } from "./types";
 
 const apiBaseUrl =
   (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
@@ -24,6 +24,17 @@ export function fetchNexo(params: URLSearchParams): Promise<InvestmentPayload> {
   return getJson<InvestmentPayload>(`/api/nexo?${params.toString()}`);
 }
 
+export function fetchArbitrum(params: URLSearchParams): Promise<ArbitrumPayload> {
+  return getJson<ArbitrumPayload>(`/api/arbitrum?${params.toString()}`);
+}
+
 export function fetchRealEstate(params: URLSearchParams): Promise<RealEstatePayload> {
   return getJson<RealEstatePayload>(`/api/real-estate?${params.toString()}`);
+}
+
+export async function stopServer(): Promise<void> {
+  const response = await fetch("/api/server/stop", { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
 }
