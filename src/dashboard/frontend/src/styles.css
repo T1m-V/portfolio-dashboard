@@ -574,12 +574,18 @@ tr:hover td {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 16px;
   }
 
   nav {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    flex: 1;
+    flex: 1 1 480px;
+    min-width: 0;
+  }
+
+  .serverStop {
+    margin-top: 0;
   }
 
   .filterRail,
