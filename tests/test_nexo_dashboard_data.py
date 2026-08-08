@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import dashboard.data_handling.nexo_data as nexo_data
+import portfolio_dashboard.data_handling.nexo_data as nexo_data
 
 
 def test_missing_nexo_snapshot_file_returns_empty_dashboard_data(

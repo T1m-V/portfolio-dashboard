@@ -1,4 +1,4 @@
-from real_estate.core import (
+from portfolio_dashboard.real_estate.core import (
     load_home_costs,
     load_home_inflows,
     load_home_values,

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-
-from blockchain_reader.dashboard_artifacts import (
+from portfolio_core import BLOCKCHAIN_DASHBOARD_FOLDER
+from portfolio_crypto_data.dashboard_artifacts import (
     ASSET_DAILY_COLUMNS,
     ASSETS_COLUMNS,
     COMPOSITION_DAILY_COLUMNS,
@@ -13,8 +13,7 @@ from blockchain_reader.dashboard_artifacts import (
     TIMESERIES_DAILY_COLUMNS,
     TRANSACTIONS_DASHBOARD_COLUMNS,
 )
-from blockchain_reader.symbols import sanitize_symbol
-from file_paths import BLOCKCHAIN_DASHBOARD_FOLDER
+from portfolio_crypto_data.symbols import sanitize_symbol
 
 CHAIN = "arbitrum"
 

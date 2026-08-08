@@ -11,6 +11,10 @@ const apiTarget = processEnv.VITE_API_TARGET ?? processEnv.DASHBOARD_API_URL ?? 
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: "../static",
+    emptyOutDir: true
+  },
   server: {
     port: 5173,
     proxy: {

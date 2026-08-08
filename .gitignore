@@ -1,0 +1,9 @@
+.venv/
+dist/
+node_modules/
+src/portfolio_dashboard/frontend/node_modules/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+

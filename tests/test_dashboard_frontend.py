@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 APP_SOURCE = (
-    Path(__file__).resolve().parents[1] / "src" / "dashboard" / "frontend" / "src" / "App.tsx"
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "portfolio_dashboard"
+    / "frontend"
+    / "src"
+    / "App.tsx"
 )
 
 

@@ -110,3 +110,17 @@ export type OptionsPayload = {
     assets: Option[];
   };
 };
+
+export type RefreshKind = "prices" | "transactions" | "crypto" | "all";
+
+export type RefreshJob = {
+  id: string;
+  kind: RefreshKind;
+  status: "queued" | "running" | "succeeded" | "failed";
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  currentStep: string | null;
+  error: string | null;
+  logs: string[];
+};

@@ -1,6 +1,10 @@
 import pandas as pd
-
-from file_paths import PRICE_DATA_FOLDER, SNAPSHOT_FILE_PATH, STOCK_METADATA, TRANSACTIONS_FILE_PATH
+from portfolio_core import (
+    PRICE_DATA_FOLDER,
+    SNAPSHOT_FILE_PATH,
+    STOCK_METADATA,
+    TRANSACTIONS_FILE_PATH,
+)
 
 COLS_TO_FILL = [
     "Quantity",
@@ -63,17 +67,17 @@ def load_and_process_data_group_stocks(
 
     # 1. Resolve File Paths
     if isins:
-        file_paths = [PRICE_DATA_FOLDER / f"{isin}.csv" for isin in isins]
+        portfolio_core = [PRICE_DATA_FOLDER / f"{isin}.csv" for isin in isins]
         # Check if files exist; raise error if any are missing
-        for p in file_paths:
+        for p in portfolio_core:
             if not p.exists():
                 raise FileNotFoundError(f"Price file not found for ISIN: {p.stem}")
     else:
-        file_paths = list(PRICE_DATA_FOLDER.glob("*.csv"))
+        portfolio_core = list(PRICE_DATA_FOLDER.glob("*.csv"))
 
     # 2. Bulk Price Loading
     price_frames = []
-    for file_path in file_paths:
+    for file_path in portfolio_core:
         df_raw = pd.read_csv(file_path)
         df_price = _process_price_history(df_prices=df_raw, isin=file_path.stem, end_dt=end_dt)
         if not df_price.empty:

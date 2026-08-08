@@ -3,14 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
-from blockchain_reader.symbols import sanitize_symbol
-from file_paths import (
+from portfolio_core import (
     BLOCKCHAIN_SNAPSHOT_FOLDER,
     BLOCKCHAIN_TRANSACTIONS_FOLDER,
     CURRENCY_METADATA,
     PRICE_DATA_FOLDER,
 )
+from portfolio_crypto_data.symbols import sanitize_symbol
 
 NEXO_SNAPSHOT_PATH = BLOCKCHAIN_SNAPSHOT_FOLDER / "cex" / "nexo" / "nexo_raw_snapshots.csv"
 NEXO_TRANSACTIONS_FOLDER = BLOCKCHAIN_TRANSACTIONS_FOLDER / "cex" / "nexo"

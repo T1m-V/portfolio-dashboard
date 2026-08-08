@@ -3,8 +3,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import real_estate.core as real_estate_core
-from real_estate import (
+import portfolio_dashboard.real_estate.core as real_estate_core
+from portfolio_dashboard.real_estate import (
     load_home_costs,
     load_home_inflows,
     load_home_values,

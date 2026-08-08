@@ -3,8 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-
-from file_paths import (
+from portfolio_core import (
     REAL_ESTATE_COSTS_FILE_NAME,
     REAL_ESTATE_FOLDER,
     REAL_ESTATE_INFLOWS_FILE_NAME,

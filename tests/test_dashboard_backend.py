@@ -3,10 +3,10 @@ from __future__ import annotations
 import pandas as pd
 from fastapi.testclient import TestClient
 
-import dashboard.main as main
-import dashboard.services as services
-from dashboard.data_handling.arbitrum_artifacts import ArbitrumDashboardArtifacts
-from dashboard.data_handling.real_estate_data import RealEstateDataBundle
+import portfolio_dashboard.main as main
+import portfolio_dashboard.services as services
+from portfolio_dashboard.data_handling.arbitrum_artifacts import ArbitrumDashboardArtifacts
+from portfolio_dashboard.data_handling.real_estate_data import RealEstateDataBundle
 
 
 def _build_arbitrum_artifacts(

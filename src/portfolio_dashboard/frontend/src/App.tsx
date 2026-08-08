@@ -29,7 +29,16 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type React from "react";
-import { fetchArbitrum, fetchNexo, fetchOptions, fetchRealEstate, fetchStocks, stopServer } from "./api";
+import {
+  fetchArbitrum,
+  fetchNexo,
+  fetchOptions,
+  fetchRealEstate,
+  fetchRefreshJob,
+  fetchStocks,
+  startRefresh,
+  stopServer
+} from "./api";
 import type {
   ArbitrumPayload,
   CompositionPayload,
@@ -39,6 +48,8 @@ import type {
   Option,
   OptionsPayload,
   RealEstatePayload,
+  RefreshJob,
+  RefreshKind,
   TablePayload
 } from "./types";
 
@@ -1112,6 +1123,44 @@ function RealEstateDashboard({
   );
 }
 
+const refreshOptions: { kind: RefreshKind; label: string }[] = [
+  { kind: "prices", label: "Refresh prices" },
+  { kind: "transactions", label: "Refresh Getquin" },
+  { kind: "crypto", label: "Refresh crypto" },
+  { kind: "all", label: "Refresh all" }
+];
+
+function RefreshControls({
+  job,
+  onRefresh
+}: {
+  job: RefreshJob | null;
+  onRefresh: (kind: RefreshKind) => void;
+}) {
+  const active = job?.status === "queued" || job?.status === "running";
+  return (
+    <section className="refreshControls">
+      <span className="sidebarLabel">Data loaders</span>
+      {refreshOptions.map((option) => (
+        <button
+          disabled={active}
+          key={option.kind}
+          onClick={() => onRefresh(option.kind)}
+          type="button"
+        >
+          <RefreshCcw className={active ? "spinning" : ""} size={15} />
+          <span>{option.label}</span>
+        </button>
+      ))}
+      {job ? (
+        <small className={`refreshStatus ${job.status}`}>
+          {job.currentStep ?? job.error ?? job.status}
+        </small>
+      ) : null}
+    </section>
+  );
+}
+
 export default function App() {
   const [active, setActive] = useState<TabKey>("stocks");
   const [date, setDate] = useState(todayIso());
@@ -1124,6 +1173,8 @@ export default function App() {
   const [options, setOptions] = useState<OptionsPayload | null>(null);
   const [error, setError] = useState("");
   const [stopMessage, setStopMessage] = useState("");
+  const [refreshJob, setRefreshJob] = useState<RefreshJob | null>(null);
+  const [refreshRevision, setRefreshRevision] = useState(0);
 
   useEffect(() => {
     fetchOptions().then(setOptions).catch((reason: Error) => setError(reason.message));
@@ -1132,6 +1183,24 @@ export default function App() {
   useEffect(() => {
     setActiveStartDate(null);
   }, [active]);
+
+  useEffect(() => {
+    if (!refreshJob || !["queued", "running"].includes(refreshJob.status)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      fetchRefreshJob(refreshJob.id)
+        .then((updated) => {
+          setRefreshJob(updated);
+          if (updated.status === "succeeded") {
+            setRefreshRevision((value) => value + 1);
+            fetchOptions().then(setOptions).catch((reason: Error) => setError(reason.message));
+          }
+        })
+        .catch((reason: Error) => setError(reason.message));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [refreshJob]);
 
   const fromDate = useMemo(() => {
     if (period === "custom") {
@@ -1189,6 +1258,11 @@ export default function App() {
       .catch((reason: Error) => setStopMessage(reason.message));
   }
 
+  function handleRefresh(kind: RefreshKind) {
+    setError("");
+    startRefresh(kind).then(setRefreshJob).catch((reason: Error) => setError(reason.message));
+  }
+
   return (
     <main className="appShell">
       <aside className="sidebar">
@@ -1210,6 +1284,7 @@ export default function App() {
             );
           })}
         </nav>
+        <RefreshControls job={refreshJob} onRefresh={handleRefresh} />
         <button className="serverStop" type="button" onClick={handleStopServer}>
           <Power size={17} />
           <span>Stop Backend</span>
@@ -1221,7 +1296,7 @@ export default function App() {
         {stopMessage ? <div className="warning">{stopMessage}</div> : null}
         {options ? (
           <AnimatePresence mode="wait">
-            <motion.div key={active} initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.985 }} transition={{ duration: 0.18 }}>
+            <motion.div key={`${active}-${refreshRevision}`} initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.985 }} transition={{ duration: 0.18 }}>
               {active === "stocks" ? (
                 <InvestmentDashboard
                   kind="stocks"

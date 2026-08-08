@@ -1,4 +1,11 @@
-import type { ArbitrumPayload, InvestmentPayload, OptionsPayload, RealEstatePayload } from "./types";
+import type {
+  ArbitrumPayload,
+  InvestmentPayload,
+  OptionsPayload,
+  RealEstatePayload,
+  RefreshJob,
+  RefreshKind
+} from "./types";
 
 const apiBaseUrl =
   (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
@@ -32,8 +39,21 @@ export function fetchRealEstate(params: URLSearchParams): Promise<RealEstatePayl
   return getJson<RealEstatePayload>(`/api/real-estate?${params.toString()}`);
 }
 
+export async function startRefresh(kind: RefreshKind): Promise<RefreshJob> {
+  const response = await fetch(`${apiBaseUrl}/api/refresh/${kind}`, { method: "POST" });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(payload?.detail ?? `Request failed: ${response.status}`);
+  }
+  return response.json() as Promise<RefreshJob>;
+}
+
+export function fetchRefreshJob(jobId: string): Promise<RefreshJob> {
+  return getJson<RefreshJob>(`/api/refresh/jobs/${jobId}`);
+}
+
 export async function stopServer(): Promise<void> {
-  const response = await fetch("/api/server/stop", { method: "POST" });
+  const response = await fetch(`${apiBaseUrl}/api/server/stop`, { method: "POST" });
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
   }

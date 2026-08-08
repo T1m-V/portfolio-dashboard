@@ -1,6 +1,6 @@
 import pandas as pd
 
-from dashboard.data_handling.real_estate_data import (
+from portfolio_dashboard.data_handling.real_estate_data import (
     build_monthly_cashflow_frame,
     build_mortgage_balance_frame,
     build_value_equity_frame,

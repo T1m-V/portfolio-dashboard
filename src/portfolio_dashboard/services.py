@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from portfolio_core import CURRENCY_METADATA, STOCK_METADATA, get_forex_rate
 
-from dashboard.data_handling.arbitrum_artifacts import (
+from portfolio_dashboard.data_handling.arbitrum_artifacts import (
     ArbitrumDashboardArtifacts,
     filter_selection,
     latest_rows_as_of,
@@ -14,13 +15,13 @@ from dashboard.data_handling.arbitrum_artifacts import (
     rows_through_date,
     selection_key,
 )
-from dashboard.data_handling.nexo_data import (
+from portfolio_dashboard.data_handling.nexo_data import (
     get_nexo_start_date,
     list_nexo_coins,
     load_and_process_nexo_data,
     load_recent_nexo_transactions,
 )
-from dashboard.data_handling.real_estate_data import (
+from portfolio_dashboard.data_handling.real_estate_data import (
     build_monthly_cashflow_frame,
     build_mortgage_balance_frame,
     build_recent_inflows_frame,
@@ -32,13 +33,11 @@ from dashboard.data_handling.real_estate_data import (
     load_real_estate_bundle,
     summarize_mortgages_from_rows,
 )
-from dashboard.data_handling.transaction_data import (
+from portfolio_dashboard.data_handling.transaction_data import (
     get_stock_start_date,
     load_and_process_data_group_stocks,
     load_recent_stock_transactions,
 )
-from file_paths import CURRENCY_METADATA, STOCK_METADATA
-from historical_transactions.portfolio_snapshots import get_forex_rate
 
 PAGE_SIZE = 5
 ARBITRUM_CHAIN = "arbitrum"

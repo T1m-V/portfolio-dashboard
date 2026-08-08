@@ -83,6 +83,7 @@ nav {
 }
 
 nav button,
+.refreshControls button,
 .serverStop {
   display: flex;
   align-items: center;
@@ -103,6 +104,67 @@ nav button.active {
   border-color: rgba(45, 242, 201, 0.2);
   background: rgba(45, 242, 201, 0.08);
   box-shadow: inset 3px 0 0 #2df2c9;
+}
+
+.refreshControls {
+  display: grid;
+  gap: 6px;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(232, 255, 248, 0.08);
+}
+
+.sidebarLabel {
+  padding: 0 6px 5px;
+  color: #7d8b9f;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.refreshControls button {
+  padding: 9px 10px;
+  border-color: rgba(45, 242, 201, 0.12);
+  background: rgba(45, 242, 201, 0.035);
+}
+
+.refreshControls button:hover:not(:disabled) {
+  color: #e8fff8;
+  border-color: rgba(45, 242, 201, 0.32);
+  background: rgba(45, 242, 201, 0.08);
+}
+
+.refreshControls button:disabled {
+  cursor: wait;
+  opacity: 0.48;
+}
+
+.refreshStatus {
+  min-height: 28px;
+  padding: 5px 7px;
+  color: #9eacb9;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.refreshStatus.succeeded {
+  color: #b7ff5a;
+}
+
+.refreshStatus.failed {
+  color: #ff8aae;
+}
+
+.spinning {
+  animation: spin 1.1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .serverStop {

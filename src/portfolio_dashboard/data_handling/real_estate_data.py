@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+from portfolio_core import REAL_ESTATE_FOLDER
 
-from file_paths import REAL_ESTATE_FOLDER
-from real_estate import (
+from portfolio_dashboard.real_estate import (
     load_home_costs,
     load_home_inflows,
     load_home_values,
