@@ -5,7 +5,20 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from portfolio_core import CURRENCY_METADATA, STOCK_METADATA, get_forex_rate
+from portfolio_core import active_context, get_forex_rate
+from portfolio_crypto_data.nexo_dashboard import (
+    get_nexo_start_date,
+    list_nexo_coins,
+    load_and_process_nexo_data,
+    load_recent_nexo_transactions,
+)
+from portfolio_market_data.dashboard_data import (
+    get_stock_start_date,
+    load_recent_stock_transactions,
+)
+from portfolio_market_data.dashboard_data import (
+    load_stock_history as load_and_process_data_group_stocks,
+)
 
 from portfolio_dashboard.data_handling.arbitrum_artifacts import (
     ArbitrumDashboardArtifacts,
@@ -14,12 +27,6 @@ from portfolio_dashboard.data_handling.arbitrum_artifacts import (
     load_arbitrum_dashboard_artifacts,
     rows_through_date,
     selection_key,
-)
-from portfolio_dashboard.data_handling.nexo_data import (
-    get_nexo_start_date,
-    list_nexo_coins,
-    load_and_process_nexo_data,
-    load_recent_nexo_transactions,
 )
 from portfolio_dashboard.data_handling.real_estate_data import (
     build_monthly_cashflow_frame,
@@ -32,11 +39,6 @@ from portfolio_dashboard.data_handling.real_estate_data import (
     list_real_estate_assets,
     load_real_estate_bundle,
     summarize_mortgages_from_rows,
-)
-from portfolio_dashboard.data_handling.transaction_data import (
-    get_stock_start_date,
-    load_and_process_data_group_stocks,
-    load_recent_stock_transactions,
 )
 
 PAGE_SIZE = 5
@@ -110,7 +112,7 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
 def _safe_frame(load_fn, *args, **kwargs) -> pd.DataFrame:
     try:
         return load_fn(*args, **kwargs)
-    except (FileNotFoundError, ValueError, pd.errors.EmptyDataError):
+    except (FileNotFoundError, pd.errors.EmptyDataError):
         return pd.DataFrame()
 
 
@@ -143,7 +145,13 @@ def _convert_eur_value(
     if pd.isna(date_ts):
         return value_float
 
-    eur_per_usd = float(get_forex_rate(currency="USD", date=date_ts.strftime("%Y-%m-%d")))
+    eur_per_usd = float(
+        get_forex_rate(
+            currency="USD",
+            date=date_ts.strftime("%Y-%m-%d"),
+            prices_folder=active_context().paths.prices,
+        )
+    )
     return value_float / eur_per_usd
 
 
@@ -203,20 +211,22 @@ def _filter_period_rows(
 
 
 def _resolve_stock_isins(*, selection: str, mode: str) -> list[str]:
+    stock_metadata = active_context().stock_metadata()
     if mode == "name":
         return [selection] if selection else []
     if mode == "full":
-        return list(STOCK_METADATA.keys())
-    return [isin for isin, info in STOCK_METADATA.items() if info.get(mode) == selection]
+        return list(stock_metadata.keys())
+    return [isin for isin, info in stock_metadata.items() if info.get(mode) == selection]
 
 
 def _nexo_metadata_value(*, coin: str, mode: str) -> str:
+    currency_metadata = active_context().currency_metadata()
     if mode == "name":
         return coin
     if mode == "group":
-        return str(CURRENCY_METADATA.get(coin, {}).get("group", "Unknown"))
+        return str(currency_metadata.get(coin, {}).get("group", "Unknown"))
     if mode == "currency":
-        return str(CURRENCY_METADATA.get(coin, {}).get("currency", "USD"))
+        return str(currency_metadata.get(coin, {}).get("currency", "USD"))
     return ""
 
 
@@ -241,6 +251,9 @@ def _arbitrum_asset_options() -> list[dict[str, str]]:
 
 
 def build_options_payload() -> dict[str, Any]:
+    context = active_context()
+    stock_metadata = context.stock_metadata()
+    currency_metadata = context.currency_metadata()
     stock_assets = [
         {
             "label": info.get("name", isin),
@@ -249,14 +262,14 @@ def build_options_payload() -> dict[str, Any]:
             "region": info.get("region", "Unknown"),
             "provider": info.get("provider", "Unknown"),
         }
-        for isin, info in STOCK_METADATA.items()
+        for isin, info in stock_metadata.items()
     ]
     nexo_coins = [
         {
-            "label": CURRENCY_METADATA.get(coin, {}).get("name", coin),
+            "label": currency_metadata.get(coin, {}).get("name", coin),
             "value": coin,
-            "group": CURRENCY_METADATA.get(coin, {}).get("group", "Unknown"),
-            "currency": CURRENCY_METADATA.get(coin, {}).get("currency", "USD"),
+            "group": currency_metadata.get(coin, {}).get("group", "Unknown"),
+            "currency": currency_metadata.get(coin, {}).get("currency", "USD"),
         }
         for coin in list_nexo_coins()
     ]
@@ -288,7 +301,7 @@ def _stock_title(*, mode: str, selection: str) -> str:
     if mode == "full":
         return "Total Portfolio"
     if mode == "name":
-        return STOCK_METADATA.get(selection, {}).get("name", selection)
+        return active_context().stock_metadata().get(selection, {}).get("name", selection)
     return f"{mode.title()}: {selection}"
 
 
@@ -296,7 +309,9 @@ def _nexo_title(*, mode: str, selection: str) -> str:
     if mode == "full":
         return "NEXO Portfolio"
     if mode == "name":
-        return str(CURRENCY_METADATA.get(selection, {}).get("name", selection))
+        return str(
+            active_context().currency_metadata().get(selection, {}).get("name", selection)
+        )
     return f"{mode.title()}: {selection}"
 
 
@@ -450,7 +465,7 @@ def _stock_composition(
     if frame.empty:
         return {"kind": "empty", "items": []}
     if mode == "name":
-        info = STOCK_METADATA.get(selection, {})
+        info = active_context().stock_metadata().get(selection, {})
         return {
             "kind": "metadata",
             "items": [
@@ -467,7 +482,10 @@ def _stock_composition(
         return {"kind": "empty", "items": []}
     if composition not in active.columns and "ISIN" in active.columns:
         active[composition] = active["ISIN"].map(
-            lambda isin: STOCK_METADATA.get(isin, {}).get(composition, "Unknown")
+            lambda isin: active_context()
+            .stock_metadata()
+            .get(isin, {})
+            .get(composition, "Unknown")
         )
     grouped = active.groupby(composition, dropna=False)["Market Value"].sum().reset_index()
     grouped = grouped.rename(columns={composition: "label", "Market Value": "value"})
@@ -484,7 +502,7 @@ def _nexo_composition(
     if frame.empty:
         return {"kind": "empty", "items": []}
     if mode == "name":
-        info = CURRENCY_METADATA.get(selection, {})
+        info = active_context().currency_metadata().get(selection, {})
         return {
             "kind": "metadata",
             "items": [
@@ -527,12 +545,19 @@ def build_stock_payload(
         from_date=from_date,
     )
     isins = None if mode == "full" else _resolve_stock_isins(selection=selection, mode=mode)
-    frame = _safe_frame(load_and_process_data_group_stocks, end_date_str=selected_date, isins=isins)
+    context = active_context()
+    frame = _safe_frame(
+        load_and_process_data_group_stocks,
+        context=context,
+        end_date=selected_date,
+        isins=isins,
+    )
     title = _stock_title(mode=mode, selection=selection)
     snapshot = frame[frame["Date"] == pd.to_datetime(selected_date)] if not frame.empty else frame
     tx = _safe_frame(
         load_recent_stock_transactions,
-        end_date_str=selected_date,
+        context=context,
+        end_date=selected_date,
         isins=isins,
         limit=PAGE_SIZE,
     )
@@ -540,7 +565,7 @@ def build_stock_payload(
         "title": title,
         "asOfDate": selected_date,
         "fromDate": from_date,
-        "startDate": get_stock_start_date(isins=isins) or selected_date,
+        "startDate": get_stock_start_date(context=context, isins=isins) or selected_date,
         "summary": _summarize_investment_frame(
             frame=frame,
             selected_date=selected_date,

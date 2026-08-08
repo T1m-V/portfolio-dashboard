@@ -21,15 +21,15 @@ def _write_csv(path: Path, columns: list[str], rows: list[list[object]]) -> None
 
 
 @pytest.fixture
-def real_estate_paths(tmp_path, monkeypatch):
-    folder = tmp_path / "real_estate"
+def real_estate_paths():
+    from portfolio_core import active_context
+
+    folder = active_context().paths.real_estate
     asset_folder = folder / "donau87"
     costs_path = asset_folder / "costs.csv"
     inflows_path = asset_folder / "inflows.csv"
     values_path = asset_folder / "values.csv"
     ownership_path = asset_folder / "ownership.csv"
-
-    monkeypatch.setattr(real_estate_core, "REAL_ESTATE_FOLDER", folder)
 
     return {
         "folder": folder,

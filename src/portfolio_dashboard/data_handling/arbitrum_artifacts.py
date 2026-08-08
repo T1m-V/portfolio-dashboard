@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-from portfolio_core import BLOCKCHAIN_DASHBOARD_FOLDER
+from portfolio_core import active_context
 from portfolio_crypto_data.dashboard_artifacts import (
     ASSET_DAILY_COLUMNS,
     ASSETS_COLUMNS,
@@ -40,7 +40,7 @@ ARTIFACT_FILES: dict[str, tuple[str, list[str]]] = {
 
 
 def _artifact_root(chain: str = CHAIN) -> Path:
-    return BLOCKCHAIN_DASHBOARD_FOLDER / chain
+    return active_context().paths.dashboard_artifacts / chain
 
 
 def _empty(columns: list[str]) -> pd.DataFrame:

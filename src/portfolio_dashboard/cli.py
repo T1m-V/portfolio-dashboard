@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import threading
 import webbrowser
 from pathlib import Path
 
-from portfolio_core import PortfolioSettings, save_data_directory, validate_data_workspace
+from portfolio_core import PortfolioContext, save_data_directory, validate_data_workspace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,18 +27,18 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Saved portfolio data directory in {config_path}")
         return
 
-    settings = PortfolioSettings.load(args.data_dir)
-    validate_data_workspace(settings.data_dir)
-    os.environ["PORTFOLIO_DATA_DIR"] = str(settings.data_dir)
+    context = PortfolioContext.load(args.data_dir)
+    validate_data_workspace(context.paths.root)
 
     import uvicorn
+
+    from portfolio_dashboard.main import create_app
 
     url = f"http://127.0.0.1:{args.port}"
     if not args.no_open:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
-    uvicorn.run("portfolio_dashboard.main:app", host="127.0.0.1", port=args.port)
+    uvicorn.run(create_app(context=context), host="127.0.0.1", port=args.port)
 
 
 if __name__ == "__main__":
     main()
-

@@ -1,15 +1,15 @@
-from pathlib import Path
-
 import pandas as pd
+import portfolio_crypto_data.nexo_dashboard as nexo_data
+from portfolio_core import active_context
 
-import portfolio_dashboard.data_handling.nexo_data as nexo_data
+
+def _transactions_folder():
+    folder = active_context().paths.crypto_transactions / "cex" / "nexo"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
 
-def test_missing_nexo_snapshot_file_returns_empty_dashboard_data(
-    monkeypatch, tmp_path: Path
-) -> None:
-    missing_snapshot = tmp_path / "missing_nexo_raw_snapshots.csv"
-    monkeypatch.setattr(nexo_data, "NEXO_SNAPSHOT_PATH", missing_snapshot)
+def test_missing_nexo_snapshot_file_returns_empty_dashboard_data() -> None:
 
     result = nexo_data.load_and_process_nexo_data(end_date_str="2026-01-04")
 
@@ -17,10 +17,8 @@ def test_missing_nexo_snapshot_file_returns_empty_dashboard_data(
     assert nexo_data.list_nexo_coins() == []
 
 
-def test_recent_nexo_transactions_excludes_internal_and_term_rows(
-    monkeypatch, tmp_path: Path
-) -> None:
-    tx_path = tmp_path / "nexo.csv"
+def test_recent_nexo_transactions_excludes_internal_and_term_rows() -> None:
+    tx_path = _transactions_folder() / "nexo.csv"
     pd.DataFrame(
         [
             {
@@ -62,8 +60,6 @@ def test_recent_nexo_transactions_excludes_internal_and_term_rows(
         ]
     ).to_csv(tx_path, index=False)
 
-    monkeypatch.setattr(nexo_data, "NEXO_TRANSACTIONS_FOLDER", tmp_path)
-
     result = nexo_data.load_recent_nexo_transactions(
         end_date_str="2026-01-04",
         coins=None,
@@ -74,10 +70,8 @@ def test_recent_nexo_transactions_excludes_internal_and_term_rows(
     assert list(result["Date"]) == ["2026-01-03 10:00", "2026-01-02 10:00"]
 
 
-def test_recent_nexo_transactions_coin_filter_applies_after_exclusions(
-    monkeypatch, tmp_path: Path
-) -> None:
-    tx_path = tmp_path / "nexo.csv"
+def test_recent_nexo_transactions_coin_filter_applies_after_exclusions() -> None:
+    tx_path = _transactions_folder() / "nexo.csv"
     pd.DataFrame(
         [
             {
@@ -110,8 +104,6 @@ def test_recent_nexo_transactions_coin_filter_applies_after_exclusions(
         ]
     ).to_csv(tx_path, index=False)
 
-    monkeypatch.setattr(nexo_data, "NEXO_TRANSACTIONS_FOLDER", tmp_path)
-
     result = nexo_data.load_recent_nexo_transactions(
         end_date_str="2026-01-05",
         coins=["BTC"],
@@ -121,9 +113,7 @@ def test_recent_nexo_transactions_coin_filter_applies_after_exclusions(
     assert list(result["Type"]) == ["Exchange"]
 
 
-def test_recent_nexo_transactions_canonicalizes_usd_debt_bucket(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_recent_nexo_transactions_canonicalizes_usd_debt_bucket() -> None:
     pd.DataFrame(
         [
             {
@@ -154,9 +144,7 @@ def test_recent_nexo_transactions_canonicalizes_usd_debt_bucket(
                 "Date / Time (UTC)": "01/01/2026 10:00",
             },
         ]
-    ).to_csv(tmp_path / "nexo.csv", index=False)
-
-    monkeypatch.setattr(nexo_data, "NEXO_TRANSACTIONS_FOLDER", tmp_path)
+    ).to_csv(_transactions_folder() / "nexo.csv", index=False)
 
     result = nexo_data.load_recent_nexo_transactions(
         end_date_str="2026-01-04",
@@ -167,9 +155,8 @@ def test_recent_nexo_transactions_canonicalizes_usd_debt_bucket(
     assert list(result["Type"]) == ["Nexo Card Purchase", "Nexo Card Refund"]
 
 
-def test_recent_nexo_transactions_reads_all_csv_files_in_folder(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_recent_nexo_transactions_reads_all_csv_files_in_folder() -> None:
+    transactions_folder = _transactions_folder()
     pd.DataFrame(
         [
             {
@@ -182,7 +169,7 @@ def test_recent_nexo_transactions_reads_all_csv_files_in_folder(
                 "Date / Time (UTC)": "03/01/2026 10:00",
             }
         ]
-    ).to_csv(tmp_path / "nexo_part_1.csv", index=False)
+    ).to_csv(transactions_folder / "nexo_part_1.csv", index=False)
     pd.DataFrame(
         [
             {
@@ -195,9 +182,7 @@ def test_recent_nexo_transactions_reads_all_csv_files_in_folder(
                 "Date / Time (UTC)": "02/01/2026 10:00",
             }
         ]
-    ).to_csv(tmp_path / "nexo_part_2.csv", index=False)
-
-    monkeypatch.setattr(nexo_data, "NEXO_TRANSACTIONS_FOLDER", tmp_path)
+    ).to_csv(transactions_folder / "nexo_part_2.csv", index=False)
 
     result = nexo_data.load_recent_nexo_transactions(
         end_date_str="2026-01-04",

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from portfolio_core import active_context
 
 import portfolio_dashboard.main as main
 from portfolio_dashboard.refresh_jobs import RefreshAlreadyRunningError, RefreshJobManager
@@ -63,8 +64,7 @@ def test_refresh_api_returns_job_and_handles_missing_job(monkeypatch) -> None:
         def get(self, job_id: str):
             return expected if job_id == "job-1" else None
 
-    monkeypatch.setattr(main, "refresh_jobs", FakeJobs())
-    client = TestClient(main.app)
+    client = TestClient(main.create_app(context=active_context(), jobs=FakeJobs()))
 
     assert client.post("/api/refresh/prices").status_code == 202
     assert client.get("/api/refresh/jobs").json() == [expected]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from portfolio_core import active_context
 
 import portfolio_dashboard.main as main
 import portfolio_dashboard.services as services
@@ -492,7 +493,7 @@ def test_real_estate_api_endpoint_uses_query_contract(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "build_real_estate_payload", fake_payload)
 
-    client = TestClient(main.app)
+    client = TestClient(main.create_app(context=active_context()))
     response = client.get(
         "/api/real-estate?date=2026-01-01&fromDate=2025-01-01&asset=ALL&outflowLimit=10&inflowLimit=25"
     )
@@ -515,7 +516,7 @@ def test_investment_api_endpoints_pass_from_date(monkeypatch) -> None:
     monkeypatch.setattr(main, "build_stock_payload", fake_stock_payload)
     monkeypatch.setattr(main, "build_nexo_payload", fake_nexo_payload)
 
-    client = TestClient(main.app)
+    client = TestClient(main.create_app(context=active_context()))
 
     stock_response = client.get("/api/stocks?date=2026-01-31&fromDate=2026-01-01")
     nexo_response = client.get("/api/nexo?date=2026-01-31&fromDate=2026-01-01")
@@ -721,7 +722,7 @@ def test_arbitrum_api_endpoint_uses_query_contract(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "build_arbitrum_payload", fake_payload)
 
-    client = TestClient(main.app)
+    client = TestClient(main.create_app(context=active_context()))
     response = client.get(
         "/api/arbitrum?date=2026-01-01&fromDate=2025-01-01&mode=name&selection=ETH&composition=route&currency=USD"
     )
@@ -739,7 +740,7 @@ def test_stop_server_endpoint_returns_before_shutdown(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "request_server_stop", fake_stop)
 
-    client = TestClient(main.app)
+    client = TestClient(main.create_app(context=active_context()))
     response = client.post("/api/server/stop")
 
     assert response.status_code == 200

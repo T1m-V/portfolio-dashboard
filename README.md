@@ -16,3 +16,10 @@ through the local API while the process is running.
 
 uv stores this project's environment in its local centralized cache rather than beside the repo.
 
+For an installation that does not require any source checkout:
+
+```powershell
+uv tool install "portfolio-dashboard @ git+https://github.com/T1m-V/portfolio-dashboard.git@v0.2.0"
+portfolio-dashboard configure --data-dir "C:\path\to\portfolio-data"
+portfolio-dashboard serve
+```

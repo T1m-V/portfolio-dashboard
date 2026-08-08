@@ -1047,8 +1047,8 @@ wheels = [
 
 [[package]]
 name = "portfolio-core"
-version = "0.1.0"
-source = { git = "https://github.com/T1m-V/portfolio-core.git?tag=v0.1.0#16ef8624e2c6c8ed9f31f90c89af7c54c823e584" }
+version = "0.2.0"
+source = { git = "https://github.com/T1m-V/portfolio-core.git?rev=v0.2.0#9f30e81cf565750c99c339cd5cb6dc6415307567" }
 dependencies = [
     { name = "pandas" },
     { name = "platformdirs" },
@@ -1057,8 +1057,8 @@ dependencies = [
 
 [[package]]
 name = "portfolio-crypto-data"
-version = "0.1.0"
-source = { git = "https://github.com/T1m-V/portfolio-crypto-data.git?tag=v0.1.0#bc2be4fc900b0e667caf259f534598c8eaa67209" }
+version = "0.2.0"
+source = { git = "https://github.com/T1m-V/portfolio-crypto-data.git?rev=v0.2.0#8db95ae0d921aa87de92e8509e61876548c175be" }
 dependencies = [
     { name = "pandas" },
     { name = "portfolio-core" },
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "portfolio-dashboard"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -1091,9 +1091,9 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "pandas", specifier = ">=2.3.3" },
-    { name = "portfolio-core", git = "https://github.com/T1m-V/portfolio-core.git?tag=v0.1.0" },
-    { name = "portfolio-crypto-data", git = "https://github.com/T1m-V/portfolio-crypto-data.git?tag=v0.1.0" },
-    { name = "portfolio-market-data", git = "https://github.com/T1m-V/portfolio-market-data.git?tag=v0.1.0" },
+    { name = "portfolio-core", git = "https://github.com/T1m-V/portfolio-core.git?rev=v0.2.0" },
+    { name = "portfolio-crypto-data", git = "https://github.com/T1m-V/portfolio-crypto-data.git?rev=v0.2.0" },
+    { name = "portfolio-market-data", git = "https://github.com/T1m-V/portfolio-market-data.git?rev=v0.2.0" },
     { name = "uvicorn", specifier = ">=0.40.0" },
 ]
 
@@ -1106,8 +1106,8 @@ dev = [
 
 [[package]]
 name = "portfolio-market-data"
-version = "0.1.0"
-source = { git = "https://github.com/T1m-V/portfolio-market-data.git?tag=v0.1.0#75ba739d89c2009f2f6a7034723dd7c095dc6b06" }
+version = "0.2.0"
+source = { git = "https://github.com/T1m-V/portfolio-market-data.git?rev=v0.2.0#dee7ab5c4b1916078c2ef8e5ab83175a4f6b1023" }
 dependencies = [
     { name = "html5lib" },
     { name = "lxml" },

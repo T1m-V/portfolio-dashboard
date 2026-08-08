@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "0.12.3"
+      - run: uv python install 3.14
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run python -m pytest
+      - name: Build frontend
+        working-directory: src/portfolio_dashboard/frontend
+        run: |
+          npm ci
+          npm audit --audit-level=low
+          npm run build
+      - run: uv build
+      - name: Install wheel without sibling checkouts
+        run: |
+          uv venv .ci-venv --python 3.14
+          uv pip install --python .ci-venv/bin/python dist/*.whl
+          .ci-venv/bin/portfolio-dashboard --help
+          .ci-venv/bin/python -c "from importlib.resources import files; from portfolio_dashboard.main import create_app; from portfolio_core import PortfolioContext; assert files('portfolio_dashboard').joinpath('static/index.html').is_file(); create_app(context=PortfolioContext.from_root('.'))"

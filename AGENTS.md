@@ -11,8 +11,8 @@ installed CLI process boundaries. A checkout of the loader repositories is not r
 | Package/workspace | How the dashboard uses it |
 | --- | --- |
 | `portfolio-core` | Settings, data-root selection, schema validation, metadata, paths, and forex lookup. |
-| `portfolio-market-data` | Installed runtime dependency. Refresh jobs invoke `python -m portfolio_market_data.cli`; do not import its private loader internals. |
-| `portfolio-crypto-data` | Read-oriented dashboard artifacts and symbol helpers are imported; refresh jobs invoke its CLI. |
+| `portfolio-market-data` | Installed runtime dependency. Its deliberate `dashboard_data` read contract is imported; refresh jobs invoke its CLI. |
+| `portfolio-crypto-data` | Its Nexo and on-chain read contracts are imported; refresh jobs invoke its CLI. |
 | `portfolio-data` | External runtime workspace read by API services and mutated only through explicit refresh jobs. It is not source code and is not bundled in the wheel. |
 
 No first-party package depends on the dashboard. It is the top-level application and composition
@@ -21,10 +21,11 @@ root.
 ## Application Map
 
 - `portfolio_dashboard.cli`: configures the data root and serves on `127.0.0.1` only.
-- `portfolio_dashboard.main`: FastAPI routes, localhost guards, and static frontend mounting.
+- `portfolio_dashboard.main`: explicit `create_app(context=...)` factory, FastAPI routes,
+  localhost guards, and static frontend mounting.
 - `portfolio_dashboard.services`: read models and JSON payload construction.
-- `portfolio_dashboard.data_handling`: focused readers/adapters for stock, Nexo, Arbitrum, and
-  real-estate data.
+- `portfolio_dashboard.data_handling`: focused readers/adapters for Arbitrum and real-estate data;
+  market and Nexo projections stay in their owning loader packages.
 - `portfolio_dashboard.refresh_jobs`: one-at-a-time subprocess orchestration for prices,
   transactions, crypto, and combined refreshes.
 - `portfolio_dashboard.real_estate`: real-estate calculations owned by this app.

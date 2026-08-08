@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
-from portfolio_core import REAL_ESTATE_FOLDER
+from portfolio_core import active_context
 
 from portfolio_dashboard.real_estate import (
     load_home_costs,
@@ -32,9 +32,10 @@ def list_real_estate_assets() -> list[str]:
     returns:
         Sorted asset folder names.
     """
-    if not REAL_ESTATE_FOLDER.exists():
+    real_estate_folder = active_context().paths.real_estate
+    if not real_estate_folder.exists():
         return []
-    return sorted([path.name for path in REAL_ESTATE_FOLDER.iterdir() if path.is_dir()])
+    return sorted([path.name for path in real_estate_folder.iterdir() if path.is_dir()])
 
 
 def _safe_loader_call(loader_name: str, load_fn, asof_date: str) -> tuple[pd.DataFrame, str | None]:

@@ -3,14 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from portfolio_core import (
-    REAL_ESTATE_COSTS_FILE_NAME,
-    REAL_ESTATE_FOLDER,
-    REAL_ESTATE_INFLOWS_FILE_NAME,
-    REAL_ESTATE_MORTGAGE_GLOB,
-    REAL_ESTATE_OWNERSHIP_FILE_NAME,
-    REAL_ESTATE_VALUES_FILE_NAME,
-)
+from portfolio_core import active_context
+
+REAL_ESTATE_COSTS_FILE_NAME = "costs.csv"
+REAL_ESTATE_INFLOWS_FILE_NAME = "inflows.csv"
+REAL_ESTATE_VALUES_FILE_NAME = "values.csv"
+REAL_ESTATE_OWNERSHIP_FILE_NAME = "ownership.csv"
+REAL_ESTATE_MORTGAGE_GLOB = "*mortgage*.csv"
 
 COST_COLUMNS = ["Asset", "Date", "Cost Type", "Amount", "Notes"]
 INFLOW_COLUMNS = ["Asset", "Date", "Inflow Type", "Amount", "Notes"]
@@ -35,10 +34,11 @@ def _list_asset_folders() -> list[Path]:
     returns:
         Sorted directories under the real-estate data root.
     """
-    if not REAL_ESTATE_FOLDER.exists():
+    real_estate_folder = active_context().paths.real_estate
+    if not real_estate_folder.exists():
         return []
 
-    return sorted([path for path in REAL_ESTATE_FOLDER.iterdir() if path.is_dir()])
+    return sorted([path for path in real_estate_folder.iterdir() if path.is_dir()])
 
 
 def _parse_asof_date(asof_date: str | None) -> pd.Timestamp | None:
