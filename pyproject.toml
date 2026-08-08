@@ -27,6 +27,11 @@ build-backend = "uv_build"
 required-version = ">=0.12.3,<0.13"
 preview-features = ["centralized-project-envs"]
 
+[tool.uv.sources]
+portfolio-core = { path = "../portfolio-core", editable = true }
+portfolio-crypto-data = { path = "../portfolio-crypto-data", editable = true }
+portfolio-market-data = { path = "../portfolio-market-data", editable = true }
+
 [tool.uv.build-backend]
 source-exclude = ["node_modules"]
 wheel-exclude = ["frontend"]

@@ -31,6 +31,8 @@ root.
 - `portfolio_dashboard.real_estate`: real-estate calculations owned by this app.
 - `frontend/`: editable TypeScript/React source.
 - `static/`: generated production assets bundled in the wheel.
+- `scripts/test-all.ps1`: coordinated developer checks for every sibling package and the optional
+  tag-backed data environment.
 
 ## Refactoring Policy
 
@@ -84,6 +86,14 @@ reproducible and verify that `npm audit` reports no known vulnerabilities.
 - Never move a published tag; publish a new dashboard version.
 
 ## Development
+
+`[project].dependencies` must retain immutable Git tags so the wheel installs without sibling
+checkouts. `[tool.uv.sources]` deliberately overrides all three first-party dependencies with
+editable sibling paths only when synchronizing this repository. Keep both halves of that setup.
+
+Use `scripts/test-all.ps1` for the coordinated local package suite. Pass `-Frontend` for npm audit
+and the production bundle, and `-DataWorkspace <path>` to validate the separate tag-backed
+end-user environment.
 
 ```powershell
 uv sync
