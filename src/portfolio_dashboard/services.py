@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -15,78 +13,33 @@ from portfolio_crypto_data.nexo_dashboard import (
 from portfolio_market_data.dashboard_data import (
     get_stock_start_date,
     load_recent_stock_transactions,
-)
-from portfolio_market_data.dashboard_data import (
-    load_stock_history as load_and_process_data_group_stocks,
+    load_stock_history,
 )
 
-from portfolio_dashboard.data_handling.arbitrum_artifacts import (
-    ArbitrumDashboardArtifacts,
-    filter_selection,
-    latest_rows_as_of,
-    load_arbitrum_dashboard_artifacts,
-    rows_through_date,
+from portfolio_dashboard.arbitrum import (
+    ArbitrumArtifacts,
+    latest_as_of,
+    load_arbitrum_artifacts,
+    load_arbitrum_assets,
+    select,
     selection_key,
+    through_date,
 )
-from portfolio_dashboard.data_handling.real_estate_data import (
-    build_monthly_cashflow_frame,
-    build_mortgage_balance_frame,
-    build_recent_inflows_frame,
-    build_recent_outflows_frame,
-    build_value_equity_frame,
-    calculate_snapshot_metrics,
-    filter_asset,
-    list_real_estate_assets,
-    load_real_estate_bundle,
-    summarize_mortgages_from_rows,
+from portfolio_dashboard.real_estate import (
+    RealEstateData,
+    load_real_estate_data,
+    monthly_cashflow,
+    mortgage_balances,
+    mortgage_summary,
+    period_net_cash_out,
+    recent_cashflows,
+    snapshot_metrics,
+    value_equity,
 )
 
+ALL = "ALL"
 PAGE_SIZE = 5
 ARBITRUM_CHAIN = "arbitrum"
-
-
-@dataclass(frozen=True)
-class ModeOption:
-    label: str
-    value: str
-
-
-STOCK_ANALYSIS_MODES = [
-    ModeOption("Asset Group", "group"),
-    ModeOption("Region", "region"),
-    ModeOption("Provider", "provider"),
-    ModeOption("Single Asset", "name"),
-]
-STOCK_COMPOSITION_MODES = [
-    ModeOption("Asset Name", "name"),
-    ModeOption("Asset Group", "group"),
-    ModeOption("Region", "region"),
-    ModeOption("Provider", "provider"),
-]
-NEXO_ANALYSIS_MODES = [
-    ModeOption("Single Asset", "name"),
-]
-NEXO_COMPOSITION_MODES = [
-    ModeOption("Asset Name", "name"),
-    ModeOption("Asset Group", "group"),
-    ModeOption("Currency", "currency"),
-]
-ARBITRUM_ANALYSIS_MODES = [
-    ModeOption("Single Asset", "name"),
-]
-ARBITRUM_COMPOSITION_MODES = [
-    ModeOption("Asset Name", "name"),
-    ModeOption("Valuation Route", "route"),
-    ModeOption("Exposure Type", "exposure"),
-]
-ARBITRUM_CURRENCY_OPTIONS = [
-    ModeOption("EUR", "EUR"),
-    ModeOption("USD", "USD"),
-]
-
-
-def _mode_options(options: list[ModeOption]) -> list[dict[str, str]]:
-    return [{"label": option.label, "value": option.value} for option in options]
 
 
 def _json_value(value: Any) -> Any:
@@ -97,792 +50,396 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
-    if frame.empty:
-        return []
-    output = frame.copy()
-    for column in output.columns:
-        if pd.api.types.is_datetime64_any_dtype(output[column]):
-            output[column] = output[column].dt.strftime("%Y-%m-%d")
+def records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return [
-        {key: _json_value(value) for key, value in row.items()} for row in output.to_dict("records")
+        {key: _json_value(value) for key, value in row.items()} for row in frame.to_dict("records")
     ]
 
 
-def _safe_frame(load_fn, *args, **kwargs) -> pd.DataFrame:
+def table(frame: pd.DataFrame, columns: list[str] | None = None) -> dict[str, Any]:
+    visible = columns or list(frame.columns)
+    visible = [column for column in visible if column in frame.columns]
+    return {"columns": visible, "rows": records(frame[visible])}
+
+
+def currency(value: float, unit: str = "EUR") -> str:
+    decimals = 0 if abs(value) > 100 else 2
+    return f"{unit} {value:,.{decimals}f}"
+
+
+def _period(frame: pd.DataFrame, from_date: str, through_date: str) -> pd.DataFrame:
+    if frame.empty:
+        return frame.copy()
+    return frame[frame["Date"].between(pd.Timestamp(from_date), pd.Timestamp(through_date))].copy()
+
+
+def _optional_frame(load, *args, **kwargs) -> pd.DataFrame:
     try:
-        return load_fn(*args, **kwargs)
-    except (FileNotFoundError, pd.errors.EmptyDataError):
+        return load(*args, **kwargs)
+    except FileNotFoundError, pd.errors.EmptyDataError:
         return pd.DataFrame()
 
 
-def _currency(value: float, currency: str = "EUR") -> str:
-    decimals = 0 if abs(value) > 100 else 2
-    return f"{currency} {value:,.{decimals}f}"
-
-
-def _normalize_dashboard_currency(currency: str) -> str:
-    normalized = str(currency or "EUR").upper()
-    if normalized == "USD":
-        return "USD"
-    return "EUR"
-
-
-def _convert_eur_value(
-    value: Any,
-    *,
-    currency: str,
-    date_value: Any,
-) -> float | None:
-    if pd.isna(value):
-        return None
-
-    value_float = float(value)
-    if currency == "EUR":
-        return value_float
-
-    date_ts = pd.to_datetime(date_value, errors="coerce")
-    if pd.isna(date_ts):
-        return value_float
-
-    eur_per_usd = float(
-        get_forex_rate(
-            currency="USD",
-            date=date_ts.strftime("%Y-%m-%d"),
-            prices_folder=active_context().paths.prices,
-        )
-    )
-    return value_float / eur_per_usd
-
-
-def _convert_eur_columns(
-    frame: pd.DataFrame,
-    *,
-    currency: str,
-    columns: list[str],
-    fallback_date: str | pd.Timestamp,
-) -> pd.DataFrame:
-    if frame.empty or currency == "EUR":
-        return frame.copy()
-
-    converted = frame.copy()
-    if "Date" in converted.columns:
-        dates = converted["Date"]
-    else:
-        dates = pd.Series(fallback_date, index=converted.index)
-    for column in columns:
-        if column not in converted.columns:
-            continue
-        converted[column] = [
-            _convert_eur_value(value, currency=currency, date_value=date_value)
-            for value, date_value in zip(converted[column], dates, strict=True)
-        ]
-    return converted
-
-
-def _date_window(*, selected_date: str, from_date: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-    end = pd.to_datetime(selected_date).normalize()
-    start = pd.to_datetime(from_date).normalize()
-    if start > end:
-        start = end
-    return start, end
-
-
-def _date_window_strings(*, selected_date: str, from_date: str | None) -> tuple[str, str]:
-    start, end = _date_window(
-        selected_date=selected_date,
-        from_date=from_date or selected_date,
-    )
-    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
-
-
-def _filter_period_rows(
-    frame: pd.DataFrame,
-    *,
-    from_date: str,
-    selected_date: str,
-) -> pd.DataFrame:
-    if frame.empty or "Date" not in frame.columns:
-        return frame.copy()
-
-    start, end = _date_window(selected_date=selected_date, from_date=from_date)
-    dates = pd.to_datetime(frame["Date"])
-    return frame[(dates >= start) & (dates <= end)].copy()
-
-
-def _resolve_stock_isins(*, selection: str, mode: str) -> list[str]:
-    stock_metadata = active_context().stock_metadata()
-    if mode == "name":
-        return [selection] if selection else []
-    if mode == "full":
-        return list(stock_metadata.keys())
-    return [isin for isin, info in stock_metadata.items() if info.get(mode) == selection]
-
-
-def _nexo_metadata_value(*, coin: str, mode: str) -> str:
-    currency_metadata = active_context().currency_metadata()
-    if mode == "name":
-        return coin
-    if mode == "group":
-        return str(currency_metadata.get(coin, {}).get("group", "Unknown"))
-    if mode == "currency":
-        return str(currency_metadata.get(coin, {}).get("currency", "USD"))
-    return ""
-
-
-def _resolve_nexo_coins(*, selection: str, mode: str) -> list[str]:
-    coins = list_nexo_coins()
-    if mode == "full":
-        return coins
-    if mode == "name":
-        return [selection] if selection else []
-    return [coin for coin in coins if _nexo_metadata_value(coin=coin, mode=mode) == selection]
-
-
-def _arbitrum_asset_options() -> list[dict[str, str]]:
-    artifacts = load_arbitrum_dashboard_artifacts(chain=ARBITRUM_CHAIN)
-    if artifacts.assets.empty:
-        return []
-    return [
-        {"label": row["Label"], "value": row["Value"]}
-        for _, row in artifacts.assets.sort_values("Label").iterrows()
-        if str(row["Value"]).strip()
-    ]
-
-
-def build_options_payload() -> dict[str, Any]:
+def build_options_payload() -> dict[str, list[dict[str, str]]]:
     context = active_context()
-    stock_metadata = context.stock_metadata()
-    currency_metadata = context.currency_metadata()
-    stock_assets = [
+    stocks = [
         {
             "label": info.get("name", isin),
             "value": isin,
-            "group": info.get("group", "Unknown"),
-            "region": info.get("region", "Unknown"),
-            "provider": info.get("provider", "Unknown"),
+            "group": info["group"],
+            "region": info["region"],
+            "provider": info["provider"],
         }
-        for isin, info in stock_metadata.items()
+        for isin, info in context.stock_metadata().items()
     ]
-    nexo_coins = [
-        {
-            "label": currency_metadata.get(coin, {}).get("name", coin),
-            "value": coin,
-            "group": currency_metadata.get(coin, {}).get("group", "Unknown"),
-            "currency": currency_metadata.get(coin, {}).get("currency", "USD"),
-        }
+    metadata = context.currency_metadata()
+    nexo = [
+        {"label": metadata.get(coin, {}).get("name", coin), "value": coin}
         for coin in list_nexo_coins()
     ]
-    return {
-        "stocks": {
-            "analysisModes": _mode_options(STOCK_ANALYSIS_MODES),
-            "compositionModes": _mode_options(STOCK_COMPOSITION_MODES),
-            "assets": stock_assets,
-        },
-        "nexo": {
-            "analysisModes": _mode_options(NEXO_ANALYSIS_MODES),
-            "compositionModes": _mode_options(NEXO_COMPOSITION_MODES),
-            "assets": nexo_coins,
-        },
-        "arbitrum": {
-            "analysisModes": _mode_options(ARBITRUM_ANALYSIS_MODES),
-            "compositionModes": _mode_options(ARBITRUM_COMPOSITION_MODES),
-            "assets": _arbitrum_asset_options(),
-            "currencies": _mode_options(ARBITRUM_CURRENCY_OPTIONS),
-        },
-        "realEstate": {
-            "assets": [{"label": "All Assets", "value": "ALL"}]
-            + [{"label": asset, "value": asset} for asset in list_real_estate_assets()]
-        },
-    }
+    assets = load_arbitrum_assets(ARBITRUM_CHAIN)
+    arbitrum = (
+        [
+            {"label": row["Label"], "value": row["Value"]}
+            for row in assets.sort_values("Label").to_dict("records")
+        ]
+        if not assets.empty
+        else []
+    )
+    return {"stocks": stocks, "nexo": nexo, "arbitrum": arbitrum}
 
 
-def _stock_title(*, mode: str, selection: str) -> str:
-    if mode == "full":
-        return "Total Portfolio"
-    if mode == "name":
-        return active_context().stock_metadata().get(selection, {}).get("name", selection)
-    return f"{mode.title()}: {selection}"
+def _stock_isins(dimension: str, selection: str) -> list[str]:
+    metadata = active_context().stock_metadata()
+    if selection == ALL:
+        return list(metadata)
+    if dimension == "name":
+        return [selection]
+    return [isin for isin, info in metadata.items() if info[dimension] == selection]
 
 
-def _nexo_title(*, mode: str, selection: str) -> str:
-    if mode == "full":
-        return "NEXO Portfolio"
-    if mode == "name":
-        return str(
-            active_context().currency_metadata().get(selection, {}).get("name", selection)
-        )
-    return f"{mode.title()}: {selection}"
-
-
-def _summarize_investment_frame(
-    *,
-    frame: pd.DataFrame,
-    selected_date: str,
-    from_date: str,
-    title: str,
-) -> dict[str, Any]:
-    if frame.empty or "Date" not in frame.columns:
-        return {
-            "title": title,
-            "empty": True,
-            "metrics": [],
-            "currentValue": 0,
-            "profitLoss": 0,
-        }
-
-    _, end = _date_window(selected_date=selected_date, from_date=from_date)
-    day = _investment_snapshot(frame=frame, target_date=end, include_target=True)
-    if day.empty:
-        return {
-            "title": title,
-            "empty": True,
-            "metrics": [],
-            "currentValue": 0,
-            "profitLoss": 0,
-        }
-
-    start, _ = _date_window(selected_date=selected_date, from_date=from_date)
-    baseline = _investment_snapshot(frame=frame, target_date=start, include_target=False)
-    end_totals = _investment_totals(day)
-    baseline_totals = _investment_totals(baseline)
-
-    total_value = end_totals["market_value"]
-    dividends = end_totals["dividends"] - baseline_totals["dividends"]
-    fees = end_totals["fees"] - baseline_totals["fees"]
-    taxes = end_totals["taxes"] - baseline_totals["taxes"]
-    principal = end_totals["principal"] - baseline_totals["principal"]
-    net_invested = principal + fees + taxes - dividends
-    profit_loss = (total_value - baseline_totals["market_value"]) - net_invested
-    return {
-        "title": title,
-        "empty": False,
-        "currentValue": total_value,
-        "profitLoss": profit_loss,
-        "metrics": [
-            {"label": "Current Value", "value": total_value, "display": _currency(total_value)},
-            {"label": "Net P/L", "value": profit_loss, "display": _currency(profit_loss)},
-            {"label": "Net Invested", "value": net_invested, "display": _currency(net_invested)},
-            {"label": "Dividends", "value": dividends, "display": _currency(dividends)},
-            {"label": "Fees", "value": fees, "display": _currency(fees)},
-            {"label": "Taxes", "value": taxes, "display": _currency(taxes)},
-        ],
-    }
-
-
-def _investment_snapshot(
-    *,
-    frame: pd.DataFrame,
-    target_date: pd.Timestamp,
-    include_target: bool,
-) -> pd.DataFrame:
-    if frame.empty or "Date" not in frame.columns:
-        return pd.DataFrame()
-
-    date_series = pd.to_datetime(frame["Date"])
-    mask = date_series <= target_date if include_target else date_series < target_date
-    candidates = frame[mask].copy()
-    if candidates.empty:
-        return pd.DataFrame()
-
-    snapshot_date = pd.to_datetime(candidates["Date"]).max()
-    return candidates[pd.to_datetime(candidates["Date"]) == snapshot_date].copy()
-
-
-def _investment_totals(frame: pd.DataFrame) -> dict[str, float]:
+def _snapshot(frame: pd.DataFrame, target: str, *, before: bool = False) -> pd.DataFrame:
     if frame.empty:
-        return {
-            "market_value": 0.0,
-            "principal": 0.0,
-            "fees": 0.0,
-            "taxes": 0.0,
-            "dividends": 0.0,
-            "net_invested": 0.0,
-        }
+        return frame.copy()
+    date = pd.Timestamp(target)
+    candidates = frame[frame["Date"] < date] if before else frame[frame["Date"] <= date]
+    if candidates.empty:
+        return candidates.copy()
+    return candidates[candidates["Date"] == candidates["Date"].max()].copy()
 
-    fees = float(frame["Cumulative Fees"].sum())
-    taxes = float(frame["Cumulative Taxes"].sum())
-    dividends = float(frame["Gross Dividends"].sum())
-    principal = float(frame["Principal Invested"].sum())
-    return {
-        "market_value": float(frame["Market Value"].sum()),
-        "principal": principal,
-        "fees": fees,
-        "taxes": taxes,
-        "dividends": dividends,
-        "net_invested": principal + fees + taxes - dividends,
-    }
+
+def _investment_totals(frame: pd.DataFrame) -> tuple[float, float, float, float, float]:
+    if frame.empty:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    return tuple(
+        float(frame[column].sum())
+        for column in (
+            "Market Value",
+            "Principal Invested",
+            "Cumulative Fees",
+            "Cumulative Taxes",
+            "Gross Dividends",
+        )
+    )
+
+
+def _investment_metrics(
+    frame: pd.DataFrame, from_date: str, selected_date: str
+) -> list[dict[str, Any]]:
+    current = _snapshot(frame, selected_date)
+    if current.empty:
+        return []
+    baseline = _snapshot(frame, from_date, before=True)
+    value, principal, fees, taxes, dividends = _investment_totals(current)
+    old_value, old_principal, old_fees, old_taxes, old_dividends = _investment_totals(baseline)
+    dividends -= old_dividends
+    fees -= old_fees
+    taxes -= old_taxes
+    net_invested = principal - old_principal + fees + taxes - dividends
+    profit_loss = value - old_value - net_invested
+    values = (
+        ("Current Value", value),
+        ("Net P/L", profit_loss),
+        ("Net Invested", net_invested),
+        ("Dividends", dividends),
+        ("Fees", fees),
+        ("Taxes", taxes),
+    )
+    return [
+        {"label": label, "value": number, "display": currency(number)} for label, number in values
+    ]
 
 
 def _investment_history(
-    frame: pd.DataFrame,
-    *,
-    selected_date: str,
-    from_date: str,
+    frame: pd.DataFrame, from_date: str, selected_date: str
 ) -> list[dict[str, Any]]:
-    if frame.empty or "Date" not in frame.columns:
+    if frame.empty:
         return []
-    _, end = _date_window(selected_date=selected_date, from_date=from_date)
-    history = frame[frame["Date"] <= end].copy()
+    history = frame[frame["Date"] <= pd.Timestamp(selected_date)].copy()
     history["Invested Capital"] = (
         history["Principal Invested"]
         + history["Cumulative Fees"]
         + history["Cumulative Taxes"]
         - history["Gross Dividends"]
     )
-    grouped = (
-        history.groupby("Date")
-        .agg({"Market Value": "sum", "Invested Capital": "sum", "Quantity": "sum"})
-        .reset_index()
+    history = (
+        history.groupby("Date", as_index=False)[["Market Value", "Invested Capital", "Quantity"]]
+        .sum()
+        .sort_values("Date")
     )
-    start, _ = _date_window(selected_date=selected_date, from_date=from_date)
-    baseline_candidates = grouped[grouped["Date"] < start]
-    if baseline_candidates.empty:
-        baseline_market_value = 0.0
-        baseline_invested = 0.0
-    else:
-        baseline = baseline_candidates.iloc[-1]
-        baseline_market_value = float(baseline["Market Value"])
-        baseline_invested = float(baseline["Invested Capital"])
-
-    grouped = grouped[(grouped["Date"] >= start) & (grouped["Date"] <= end)].copy()
-    if grouped.empty:
-        return []
-
-    grouped["Profit/Loss"] = (grouped["Market Value"] - baseline_market_value) - (
-        grouped["Invested Capital"] - baseline_invested
+    baseline = history[history["Date"] < pd.Timestamp(from_date)].tail(1)
+    old_value = float(baseline["Market Value"].iloc[0]) if not baseline.empty else 0.0
+    old_invested = float(baseline["Invested Capital"].iloc[0]) if not baseline.empty else 0.0
+    history = _period(history, from_date, selected_date)
+    history["Profit/Loss"] = (history["Market Value"] - old_value) - (
+        history["Invested Capital"] - old_invested
     )
-    return _records(grouped)
+    return records(history)
 
 
 def _stock_composition(
-    *,
-    frame: pd.DataFrame,
-    mode: str,
-    selection: str,
-    composition: str,
+    snapshot: pd.DataFrame, dimension: str, selection: str, composition: str
 ) -> dict[str, Any]:
-    if frame.empty:
-        return {"kind": "empty", "items": []}
-    if mode == "name":
-        info = active_context().stock_metadata().get(selection, {})
+    metadata = active_context().stock_metadata()
+    if dimension == "name" and selection != ALL:
+        info = metadata[selection]
         return {
             "kind": "metadata",
             "items": [
                 {"label": "Ticker", "value": info.get("ticker", "-")},
                 {"label": "ISIN", "value": selection},
-                {"label": "Region", "value": info.get("region", "-")},
-                {"label": "Asset Group", "value": info.get("group", "-")},
-                {"label": "Provider", "value": info.get("provider", "-")},
+                {"label": "Region", "value": info["region"]},
+                {"label": "Asset Group", "value": info["group"]},
+                {"label": "Provider", "value": info["provider"]},
             ],
         }
-
-    active = frame[frame["Quantity"] > 0.00001].copy()
+    if snapshot.empty:
+        return {"kind": "empty", "items": []}
+    active = snapshot[snapshot["Quantity"] > 0.00001].copy()
     if active.empty:
         return {"kind": "empty", "items": []}
-    if composition not in active.columns and "ISIN" in active.columns:
-        active[composition] = active["ISIN"].map(
-            lambda isin: active_context()
-            .stock_metadata()
-            .get(isin, {})
-            .get(composition, "Unknown")
-        )
-    grouped = active.groupby(composition, dropna=False)["Market Value"].sum().reset_index()
-    grouped = grouped.rename(columns={composition: "label", "Market Value": "value"})
-    return {"kind": "breakdown", "items": _records(grouped)}
-
-
-def _nexo_composition(
-    *,
-    frame: pd.DataFrame,
-    mode: str,
-    selection: str,
-    composition: str,
-) -> dict[str, Any]:
-    if frame.empty:
-        return {"kind": "empty", "items": []}
-    if mode == "name":
-        info = active_context().currency_metadata().get(selection, {})
-        return {
-            "kind": "metadata",
-            "items": [
-                {"label": "Ticker", "value": info.get("ticker", "-")},
-                {"label": "Symbol", "value": selection},
-                {"label": "Name", "value": info.get("name", selection)},
-                {"label": "Group", "value": info.get("group", "Unknown")},
-                {"label": "Currency", "value": info.get("currency", "USD")},
-            ],
-        }
-
-    active = frame[frame["Quantity"].abs() > 0.00001].copy()
-    if active.empty:
-        return {"kind": "empty", "items": []}
-    label_column = {
-        "name": "Asset Name",
-        "group": "Asset Group",
-        "currency": "Currency",
-    }[composition]
-    grouped = active.groupby(label_column, dropna=False)["Market Value"].sum().reset_index()
-    grouped = grouped.rename(columns={label_column: "label", "Market Value": "value"})
-    return {"kind": "breakdown", "items": _records(grouped)}
-
-
-def _table_payload(frame: pd.DataFrame, *, columns: list[str]) -> dict[str, Any]:
-    visible = [column for column in columns if column in frame.columns]
-    return {"columns": visible, "rows": _records(frame[visible] if visible else pd.DataFrame())}
+    active["label"] = active["ISIN"].map(lambda isin: metadata[isin][composition])
+    items = active.groupby("label", as_index=False)["Market Value"].sum()
+    return {"kind": "breakdown", "items": records(items.rename(columns={"Market Value": "value"}))}
 
 
 def build_stock_payload(
     *,
     selected_date: str,
-    from_date: str | None,
-    mode: str,
+    from_date: str,
+    dimension: str,
     selection: str,
     composition: str,
 ) -> dict[str, Any]:
-    from_date, selected_date = _date_window_strings(
-        selected_date=selected_date,
-        from_date=from_date,
-    )
-    isins = None if mode == "full" else _resolve_stock_isins(selection=selection, mode=mode)
     context = active_context()
-    frame = _safe_frame(
-        load_and_process_data_group_stocks,
-        context=context,
-        end_date=selected_date,
-        isins=isins,
+    isins = _stock_isins(dimension, selection)
+    frame = _optional_frame(
+        load_stock_history, context=context, end_date=selected_date, isins=isins
     )
-    title = _stock_title(mode=mode, selection=selection)
-    snapshot = frame[frame["Date"] == pd.to_datetime(selected_date)] if not frame.empty else frame
-    tx = _safe_frame(
+    transactions = _optional_frame(
         load_recent_stock_transactions,
         context=context,
         end_date=selected_date,
         isins=isins,
         limit=PAGE_SIZE,
     )
+    if selection == ALL:
+        title = "Stocks"
+    elif dimension == "name":
+        title = context.stock_metadata()[selection]["name"]
+    else:
+        title = selection
     return {
         "title": title,
-        "asOfDate": selected_date,
-        "fromDate": from_date,
         "startDate": get_stock_start_date(context=context, isins=isins) or selected_date,
-        "summary": _summarize_investment_frame(
-            frame=frame,
-            selected_date=selected_date,
-            from_date=from_date,
-            title=title,
-        ),
+        "metrics": _investment_metrics(frame, from_date, selected_date),
+        "history": _investment_history(frame, from_date, selected_date),
         "composition": _stock_composition(
-            frame=snapshot,
-            mode=mode,
-            selection=selection,
-            composition=composition,
+            _snapshot(frame, selected_date), dimension, selection, composition
         ),
-        "history": _investment_history(
-            frame,
-            selected_date=selected_date,
-            from_date=from_date,
-        ),
-        "transactions": _table_payload(
-            tx,
-            columns=[
-                "Date",
-                "Type",
-                "Asset Name",
-                "Quantity",
-                "Price",
-                "Currency",
-                "Fees",
-                "Taxes",
-            ],
+        "transactions": table(
+            transactions,
+            ["Date", "Type", "Asset Name", "Quantity", "Price", "Currency", "Fees", "Taxes"],
         ),
     }
 
 
-def build_nexo_payload(
-    *,
-    selected_date: str,
-    from_date: str | None,
-    mode: str,
-    selection: str,
-    composition: str,
-) -> dict[str, Any]:
-    from_date, selected_date = _date_window_strings(
-        selected_date=selected_date,
-        from_date=from_date,
-    )
-    coins = None if mode == "full" else _resolve_nexo_coins(selection=selection, mode=mode)
-    frame = _safe_frame(load_and_process_nexo_data, end_date_str=selected_date, coins=coins)
-    title = _nexo_title(mode=mode, selection=selection)
-    snapshot = frame[frame["Date"] == pd.to_datetime(selected_date)] if not frame.empty else frame
-    tx = _safe_frame(
+def _nexo_composition(snapshot: pd.DataFrame, coin: str) -> dict[str, Any]:
+    if coin != ALL:
+        info = active_context().currency_metadata().get(coin, {})
+        return {
+            "kind": "metadata",
+            "items": [
+                {"label": "Ticker", "value": info.get("ticker", "-")},
+                {"label": "Symbol", "value": coin},
+                {"label": "Name", "value": info.get("name", coin)},
+                {"label": "Group", "value": info.get("group", "Unknown")},
+                {"label": "Currency", "value": info.get("currency", "USD")},
+            ],
+        }
+    if snapshot.empty:
+        return {"kind": "empty", "items": []}
+    active = snapshot[snapshot["Quantity"].abs() > 0.00001]
+    if active.empty:
+        return {"kind": "empty", "items": []}
+    items = active.groupby("Asset Name", as_index=False)["Market Value"].sum()
+    return {
+        "kind": "breakdown",
+        "items": records(items.rename(columns={"Asset Name": "label", "Market Value": "value"})),
+    }
+
+
+def build_nexo_payload(*, selected_date: str, from_date: str, coin: str) -> dict[str, Any]:
+    coins = None if coin == ALL else [coin]
+    frame = _optional_frame(load_and_process_nexo_data, end_date_str=selected_date, coins=coins)
+    transactions = _optional_frame(
         load_recent_nexo_transactions,
         end_date_str=selected_date,
         coins=coins,
         limit=PAGE_SIZE,
     )
-    if not tx.empty:
-        tx = tx.copy()
-        tx["Input"] = tx["Input Amount"].astype(str) + " " + tx["Input Currency"].astype(str)
-        tx["Output"] = tx["Output Amount"].astype(str) + " " + tx["Output Currency"].astype(str)
+    if not transactions.empty:
+        transactions = transactions.copy()
+        transactions["Input"] = (
+            transactions["Input Amount"].astype(str) + " " + transactions["Input Currency"]
+        )
+        transactions["Output"] = (
+            transactions["Output Amount"].astype(str) + " " + transactions["Output Currency"]
+        )
+    title = (
+        "NEXO"
+        if coin == ALL
+        else active_context().currency_metadata().get(coin, {}).get("name", coin)
+    )
     return {
         "title": title,
-        "asOfDate": selected_date,
-        "fromDate": from_date,
         "startDate": get_nexo_start_date(coins=coins) or selected_date,
-        "summary": _summarize_investment_frame(
-            frame=frame,
-            selected_date=selected_date,
-            from_date=from_date,
-            title=title,
-        ),
-        "composition": _nexo_composition(
-            frame=snapshot,
-            mode=mode,
-            selection=selection,
-            composition=composition,
-        ),
-        "history": _investment_history(
-            frame,
-            selected_date=selected_date,
-            from_date=from_date,
-        ),
-        "transactions": _table_payload(
-            tx,
-            columns=["Date", "Type", "Input", "Output", "USD Equivalent", "Details"],
+        "metrics": _investment_metrics(frame, from_date, selected_date),
+        "history": _investment_history(frame, from_date, selected_date),
+        "composition": _nexo_composition(_snapshot(frame, selected_date), coin),
+        "transactions": table(
+            transactions, ["Date", "Type", "Input", "Output", "USD Equivalent", "Details"]
         ),
     }
 
 
-def _arbitrum_selected_asset(*, mode: str, selection: str) -> str:
-    if mode == "name" and selection:
-        return selection
-    return "ALL"
-
-
-def _arbitrum_title(*, mode: str, selection: str) -> str:
-    if mode == "name" and selection:
-        return f"Arbitrum: {selection}"
-    return "Arbitrum Portfolio"
-
-
-def _arbitrum_start_date(
-    *, artifacts: ArbitrumDashboardArtifacts, selected_asset: str
-) -> str | None:
-    frame = filter_selection(artifacts.timeseries_daily, selected_asset)
-    if frame.empty or "Date" not in frame.columns:
-        return None
-
-    dates = pd.to_datetime(frame["Date"], errors="coerce").dropna()
-    if dates.empty:
-        return None
-    return dates.min().strftime("%Y-%m-%d")
-
-
-def _limit_daily_frame(frame: pd.DataFrame, *, selected_date: str) -> pd.DataFrame:
-    if frame.empty or "Date" not in frame.columns:
-        return frame.copy()
-
-    limited = frame.copy()
-    limited["Date"] = pd.to_datetime(limited["Date"], errors="coerce").dt.normalize()
-    limited = limited.dropna(subset=["Date"])
-    return limited[limited["Date"] <= pd.Timestamp(selected_date).normalize()].copy()
-
-
-def _latest_rows_as_of(frame: pd.DataFrame, *, selected_date: str) -> pd.DataFrame:
-    if frame.empty or "Date" not in frame.columns:
-        return frame.copy()
-
-    dated = _limit_daily_frame(frame=frame, selected_date=selected_date)
-    if dated.empty:
-        return dated
-
-    latest_date = dated["Date"].max()
-    return dated[dated["Date"] == latest_date].copy()
-
-
-def _artifact_value_history(
-    *,
-    artifacts: ArbitrumDashboardArtifacts,
-    selected_asset: str,
-    selected_date: str,
-    currency: str,
+def _convert_from_eur(
+    frame: pd.DataFrame, columns: list[str], unit: str, fallback_date: str
 ) -> pd.DataFrame:
-    frame = filter_selection(artifacts.timeseries_daily, selected_asset)
-    frame = rows_through_date(frame=frame, selected_date=selected_date)
-    if frame.empty:
-        return pd.DataFrame(
-            columns=["Date", "Market Value", "Invested Capital", "Profit/Loss", "Quantity"]
+    if frame.empty or unit == "EUR":
+        return frame.copy()
+    result = frame.copy()
+    dates = result["Date"] if "Date" in result else pd.Series(fallback_date, index=result.index)
+    day_keys = pd.to_datetime(dates).dt.strftime("%Y-%m-%d")
+    rates = {
+        day: float(
+            get_forex_rate(
+                currency="USD",
+                date=day,
+                prices_folder=active_context().paths.prices,
+            )
         )
+        for day in day_keys.unique()
+    }
+    for column in columns:
+        result[column] = result[column] / day_keys.map(rates)
+    return result
 
-    converted = _convert_eur_columns(
-        frame,
-        currency=currency,
-        columns=["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
-        fallback_date=selected_date,
+
+def _arbitrum_transactions(
+    artifacts: ArbitrumArtifacts, asset: str, selected_date: str, limit: int | None
+) -> pd.DataFrame:
+    frame = artifacts.transactions.copy()
+    if frame.empty:
+        return frame
+    if asset != ALL:
+        key = selection_key(asset)
+        frame = frame[frame["AssetKeys"].fillna("").str.split(";").map(lambda keys: key in keys)]
+    frame = frame[frame["Date"].dt.normalize() <= pd.Timestamp(selected_date)].sort_values(
+        "Date", ascending=False
     )
-    converted = converted.rename(
+    if limit is not None:
+        frame = frame.head(limit)
+    frame = frame.copy()
+    frame["Date"] = frame["Date"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    return frame
+
+
+def _arbitrum_composition(
+    artifacts: ArbitrumArtifacts,
+    asset: str,
+    selected_date: str,
+    composition: str,
+    unit: str,
+) -> dict[str, Any]:
+    frame = select(artifacts.composition, asset)
+    frame = latest_as_of(frame[frame["CompositionMode"] == composition], selected_date)
+    frame = _convert_from_eur(frame, ["ValueEUR"], unit, selected_date)
+    if frame.empty:
+        return {"kind": "empty", "items": []}
+    items = (
+        frame.groupby("Label", as_index=False)["ValueEUR"]
+        .sum()
+        .rename(columns={"Label": "label", "ValueEUR": "value"})
+        .sort_values("value", ascending=False)
+        .head(12)
+    )
+    items = items[items["value"].abs() > 0]
+    return {"kind": "breakdown", "items": records(items)}
+
+
+def build_arbitrum_payload(
+    *,
+    selected_date: str,
+    from_date: str,
+    asset: str,
+    composition: str,
+    currency_unit: str,
+) -> dict[str, Any]:
+    artifacts = load_arbitrum_artifacts(ARBITRUM_CHAIN)
+    history = through_date(select(artifacts.timeseries, asset), selected_date)
+    history = _convert_from_eur(
+        history,
+        ["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
+        currency_unit,
+        selected_date,
+    ).rename(
         columns={
             "MarketValueEUR": "Market Value",
             "PrincipalInvestedEUR": "Invested Capital",
             "ProfitLossEUR": "Profit/Loss",
         }
     )
-    return converted[["Date", "Market Value", "Invested Capital", "Profit/Loss", "Quantity"]]
-
-
-def _artifact_summary(
-    *,
-    history: pd.DataFrame,
-    artifacts: ArbitrumDashboardArtifacts,
-    selected_asset: str,
-    selected_date: str,
-    title: str,
-    currency: str,
-) -> dict[str, Any]:
-    latest = _latest_rows_as_of(frame=history, selected_date=selected_date)
-    if latest.empty:
-        current_value = 0.0
-        net_invested = 0.0
-        profit_loss = 0.0
-    else:
-        row = latest.iloc[-1]
-        current_value = float(row.get("Market Value", 0.0) or 0.0)
-        net_invested = float(row.get("Invested Capital", 0.0) or 0.0)
-        profit_loss = float(row.get("Profit/Loss", 0.0) or 0.0)
-
-    tx_rows = _artifact_transactions(
-        artifacts=artifacts,
-        selected_asset=selected_asset,
-        selected_date=selected_date,
-        max_rows=None,
+    history = history[["Date", "Market Value", "Invested Capital", "Profit/Loss", "Quantity"]]
+    period_history = _period(history, from_date, selected_date)
+    latest = latest_as_of(history, selected_date)
+    current = latest.iloc[-1] if not latest.empty else {}
+    transactions = _arbitrum_transactions(artifacts, asset, selected_date, None)
+    metric_values = (
+        ("Current Value", float(current.get("Market Value", 0))),
+        ("Net P/L", float(current.get("Profit/Loss", 0))),
+        ("Net Invested", float(current.get("Invested Capital", 0))),
+        ("Transactions", len(transactions)),
     )
-
-    return {
-        "title": title,
-        "empty": latest.empty,
-        "currentValue": current_value,
-        "profitLoss": profit_loss,
-        "metrics": [
-            {
-                "label": "Current Value",
-                "value": current_value,
-                "display": _currency(current_value, currency),
-            },
-            {
-                "label": "Net P/L",
-                "value": profit_loss,
-                "display": _currency(profit_loss, currency),
-            },
-            {
-                "label": "Net Invested",
-                "value": net_invested,
-                "display": _currency(net_invested, currency),
-            },
-            {
-                "label": "Transactions",
-                "value": len(tx_rows),
-                "display": f"{len(tx_rows):,}",
-            },
-        ],
-    }
-
-
-def _artifact_transactions(
-    *,
-    artifacts: ArbitrumDashboardArtifacts,
-    selected_asset: str,
-    selected_date: str,
-    max_rows: int | None,
-) -> pd.DataFrame:
-    frame = artifacts.transactions_dashboard.copy()
-    columns = [
-        "Date",
-        "Type",
-        "Token in",
-        "Qty in",
-        "Token out",
-        "Qty out",
-        "Fee",
-        "Fee Token",
-        "TX Hash",
+    metrics = [
+        {
+            "label": label,
+            "value": value,
+            "display": f"{value:,}" if label == "Transactions" else currency(value, currency_unit),
+        }
+        for label, value in metric_values
     ]
-    if frame.empty:
-        return pd.DataFrame(columns=columns)
+    transaction_history = _period(
+        through_date(select(artifacts.timeseries, asset), selected_date), from_date, selected_date
+    )[["Date", "TxCount"]].rename(columns={"TxCount": "Tx Count"})
 
-    selected = selection_key(selected_asset)
-    if selected != "ALL":
-        frame = frame[
-            frame["AssetKeys"]
-            .fillna("")
-            .astype(str)
-            .str.split(";")
-            .map(lambda keys: selected in keys)
-        ].copy()
-    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
-    frame = frame.dropna(subset=["Date"])
-    frame = frame[frame["Date"].dt.normalize() <= pd.Timestamp(selected_date).normalize()]
-    frame = frame.sort_values("Date", ascending=False)
-    if max_rows is not None:
-        frame = frame.head(max_rows)
-    frame["Date"] = frame["Date"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    return frame[[column for column in columns if column in frame.columns]].reset_index(drop=True)
-
-
-def _artifact_composition(
-    *,
-    artifacts: ArbitrumDashboardArtifacts,
-    selected_asset: str,
-    selected_date: str,
-    composition: str,
-    currency: str,
-) -> dict[str, Any]:
-    frame = filter_selection(artifacts.composition_daily, selected_asset)
-    frame = frame[frame["CompositionMode"].fillna("").astype(str) == composition].copy()
-    frame = latest_rows_as_of(frame=frame, selected_date=selected_date)
-    if frame.empty:
-        return {"kind": "empty", "items": []}
-
-    converted = _convert_eur_columns(
-        frame,
-        currency=currency,
-        columns=["ValueEUR"],
-        fallback_date=selected_date,
-    )
-    grouped = (
-        converted.rename(columns={"Label": "label", "ValueEUR": "value"})
-        .groupby("label", as_index=False)["value"]
-        .sum()
-        .sort_values("value", ascending=False)
-        .head(12)
-    )
-    grouped["value"] = pd.to_numeric(grouped["value"], errors="coerce").fillna(0.0)
-    grouped = grouped[grouped["value"].abs() > 0]
-    if grouped.empty:
-        return {"kind": "empty", "items": []}
-    return {"kind": "breakdown", "items": _records(grouped)}
-
-
-def _artifact_source_breakdown(
-    *,
-    artifacts: ArbitrumDashboardArtifacts,
-    selected_asset: str,
-    selected_date: str,
-    currency: str,
-) -> pd.DataFrame:
-    if selection_key(selected_asset) == "ALL":
-        return pd.DataFrame()
-
-    frame = filter_selection(artifacts.source_daily, selected_asset)
-    frame = latest_rows_as_of(frame=frame, selected_date=selected_date)
-    if frame.empty:
-        return pd.DataFrame()
-
-    converted = _convert_eur_columns(
-        frame,
-        currency=currency,
-        columns=["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
-        fallback_date=selected_date,
+    sources = select(artifacts.sources, asset) if asset != ALL else artifacts.sources.iloc[:0]
+    sources = latest_as_of(sources, selected_date)
+    sources = _convert_from_eur(
+        sources,
+        ["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
+        currency_unit,
+        selected_date,
     ).rename(
         columns={
             "MarketValueEUR": "Market Value",
@@ -891,105 +448,27 @@ def _artifact_source_breakdown(
             "ValuationRoute": "Valuation Route",
         }
     )
-    converted["_abs_value"] = (
-        pd.to_numeric(
-            converted["Market Value"],
-            errors="coerce",
+    if not sources.empty:
+        sources = (
+            sources.assign(_value=sources["Market Value"].abs())
+            .sort_values("_value", ascending=False)
+            .head(25)
         )
-        .abs()
-        .fillna(0.0)
-    )
-    converted = converted.sort_values("_abs_value", ascending=False).head(25)
-    return converted
-
-
-def build_arbitrum_payload(
-    *,
-    selected_date: str,
-    from_date: str | None = None,
-    mode: str = "full",
-    selection: str = "",
-    composition: str = "name",
-    currency: str = "EUR",
-) -> dict[str, Any]:
-    if from_date:
-        from_date, selected_date = _date_window_strings(
-            selected_date=selected_date,
-            from_date=from_date,
-        )
-    else:
-        _, selected_date = _date_window_strings(
-            selected_date=selected_date,
-            from_date=selected_date,
-        )
-
-    artifacts = load_arbitrum_dashboard_artifacts(chain=ARBITRUM_CHAIN)
-    selected_currency = _normalize_dashboard_currency(currency)
-    selected_asset = _arbitrum_selected_asset(mode=mode, selection=selection)
-    title = _arbitrum_title(mode=mode, selection=selection)
-    start_date = _arbitrum_start_date(artifacts=artifacts, selected_asset=selected_asset)
-    history = _artifact_value_history(
-        artifacts=artifacts,
-        selected_asset=selected_asset,
-        selected_date=selected_date,
-        currency=selected_currency,
-    )
-    tx_daily_source = rows_through_date(
-        frame=filter_selection(artifacts.timeseries_daily, selected_asset),
-        selected_date=selected_date,
-    )
-    if from_date:
-        history = _filter_period_rows(
-            history,
-            from_date=from_date,
-            selected_date=selected_date,
-        )
-        tx_daily_source = _filter_period_rows(
-            tx_daily_source,
-            from_date=from_date,
-            selected_date=selected_date,
-        )
-    tx_daily = tx_daily_source[["Date", "TxCount"]].rename(columns={"TxCount": "Tx Count"})
-    source_breakdown = _artifact_source_breakdown(
-        artifacts=artifacts,
-        selected_asset=selected_asset,
-        selected_date=selected_date,
-        currency=selected_currency,
-    )
-    latest_tx = _artifact_transactions(
-        artifacts=artifacts,
-        selected_asset=selected_asset,
-        selected_date=selected_date,
-        max_rows=25,
-    )
 
     return {
-        "title": title,
-        "fromDate": from_date or start_date or selected_date,
-        "startDate": start_date or selected_date,
-        "currency": selected_currency,
-        "mode": mode,
-        "selection": selected_asset,
-        "summary": _artifact_summary(
-            history=history,
-            artifacts=artifacts,
-            selected_asset=selected_asset,
-            selected_date=selected_date,
-            title=title,
-            currency=selected_currency,
+        "title": "Arbitrum" if asset == ALL else f"Arbitrum: {asset}",
+        "startDate": (
+            history["Date"].min().strftime("%Y-%m-%d") if not history.empty else selected_date
         ),
-        "transactionsDaily": _records(tx_daily),
-        "valueHistory": _records(history),
-        "composition": _artifact_composition(
-            artifacts=artifacts,
-            selected_asset=selected_asset,
-            selected_date=selected_date,
-            composition=composition,
-            currency=selected_currency,
+        "metrics": metrics,
+        "history": records(period_history),
+        "transactionHistory": records(transaction_history),
+        "composition": _arbitrum_composition(
+            artifacts, asset, selected_date, composition, currency_unit
         ),
-        "sourceBreakdown": _table_payload(
-            source_breakdown,
-            columns=[
+        "sources": table(
+            sources,
+            [
                 "Source",
                 "Quantity",
                 "Market Value",
@@ -998,9 +477,9 @@ def build_arbitrum_payload(
                 "Valuation Route",
             ],
         ),
-        "transactions": _table_payload(
-            latest_tx,
-            columns=[
+        "transactions": table(
+            _arbitrum_transactions(artifacts, asset, selected_date, PAGE_SIZE),
+            [
                 "Date",
                 "Type",
                 "Token in",
@@ -1012,314 +491,88 @@ def build_arbitrum_payload(
                 "TX Hash",
             ],
         ),
-        "warnings": artifacts.errors,
+        "warnings": artifacts.warnings,
     }
 
 
-def _resolve_limit(value: int | str | None) -> int | None:
-    if value == "ALL":
-        return None
-    if value in [None, ""]:
-        return 5
-    return int(value)
-
-
-def _real_estate_table(frame: pd.DataFrame) -> dict[str, Any]:
-    return {"columns": list(frame.columns), "rows": _records(frame)}
-
-
-def _real_estate_start_date(*frames: pd.DataFrame) -> str | None:
-    date_parts = [
-        pd.to_datetime(frame["Date"], errors="coerce").dropna()
-        for frame in frames
-        if not frame.empty and "Date" in frame.columns
-    ]
-    if not date_parts:
-        return None
-    return pd.concat(date_parts).min().strftime("%Y-%m-%d")
-
-
-def _real_estate_period_net_cash_out(
-    *,
-    costs: pd.DataFrame,
-    inflows: pd.DataFrame,
-    mortgages: pd.DataFrame,
-) -> float:
-    total_costs = float(costs["Amount"].sum()) if not costs.empty else 0.0
-    total_inflows = float(inflows["Amount"].sum()) if not inflows.empty else 0.0
-    total_interest = float(mortgages["Interest Paid"].sum()) if not mortgages.empty else 0.0
-    total_repaid = float(mortgages["Principal Repaid"].sum()) if not mortgages.empty else 0.0
-    return round(total_costs + total_interest + total_repaid - total_inflows, 2)
-
-
-def _real_estate_outflow_breakdown(costs: pd.DataFrame, mortgages: pd.DataFrame) -> list[dict]:
-    breakdown_rows: list[dict[str, str | float]] = []
-
-    if not costs.empty:
-        grouped_costs = costs.groupby("Cost Type", as_index=False)["Amount"].sum()
-        for _, row in grouped_costs.iterrows():
-            breakdown_rows.append(
-                {"label": f"Cost: {row['Cost Type']}", "value": float(row["Amount"])}
-            )
-
-    if not mortgages.empty:
-        payment_rows = mortgages[mortgages["Entry Type"] == "PAYMENT"]
-        breakdown_rows.append(
-            {
-                "label": "Mortgage Interest",
-                "value": float(payment_rows["Interest Paid"].sum()),
-            }
-        )
-        breakdown_rows.append(
-            {
-                "label": "Mortgage Repayment",
-                "value": float(payment_rows["Principal Repaid"].sum()),
-            }
-        )
-
-    frame = pd.DataFrame(breakdown_rows)
-    if frame.empty:
-        return []
-    frame = frame[frame["value"] != 0].copy()
-    return _records(frame)
-
-
-def _real_estate_inflow_breakdown(inflows: pd.DataFrame) -> list[dict]:
-    if inflows.empty:
-        return []
-    grouped = inflows.groupby("Inflow Type", as_index=False)["Amount"].sum()
-    grouped = grouped.rename(columns={"Inflow Type": "label", "Amount": "value"})
-    grouped = grouped[grouped["value"] != 0].copy()
-    return _records(grouped)
-
-
-def _real_estate_pl_breakdown(
-    value_equity: pd.DataFrame,
-    monthly_cashflow: pd.DataFrame,
-) -> list[dict]:
-    return _records(
-        _real_estate_pl_frame(value_equity=value_equity, monthly_cashflow=monthly_cashflow)
-    )
-
-
-def _real_estate_pl_frame(
-    value_equity: pd.DataFrame,
-    monthly_cashflow: pd.DataFrame,
-) -> pd.DataFrame:
-    if value_equity.empty and monthly_cashflow.empty:
-        return pd.DataFrame(
-            columns=["Date", "Estimated Equity", "Cumulative Net Cash Flow", "Total P/L"]
-        )
-
-    equity_frame = (
-        value_equity[["Date", "Estimated Equity"]]
-        if not value_equity.empty
-        else pd.DataFrame(columns=["Date", "Estimated Equity"])
-    )
-    cashflow_frame = (
-        monthly_cashflow[["Date", "Cumulative Net Cash Flow"]]
-        if not monthly_cashflow.empty
-        else pd.DataFrame(columns=["Date", "Cumulative Net Cash Flow"])
-    )
-    merged = pd.merge(
-        left=equity_frame,
-        right=cashflow_frame,
-        on="Date",
-        how="outer",
-    ).sort_values(by="Date")
-    merged["Estimated Equity"] = pd.to_numeric(
-        merged.get("Estimated Equity", 0),
-        errors="coerce",
-    )
-    merged["Cumulative Net Cash Flow"] = pd.to_numeric(
-        merged.get("Cumulative Net Cash Flow", 0),
-        errors="coerce",
-    )
-    merged["Estimated Equity"] = merged["Estimated Equity"].ffill().fillna(0.0)
-    merged["Cumulative Net Cash Flow"] = merged["Cumulative Net Cash Flow"].ffill().fillna(0.0)
-    merged["Total P/L"] = merged["Estimated Equity"] + merged["Cumulative Net Cash Flow"]
-    return merged
-
-
-def _real_estate_period_pl_breakdown(
-    *,
-    value_equity: pd.DataFrame,
-    monthly_cashflow: pd.DataFrame,
-    from_date: str,
-    selected_date: str,
-) -> list[dict]:
-    frame = _real_estate_pl_frame(value_equity=value_equity, monthly_cashflow=monthly_cashflow)
-    if frame.empty:
-        return []
-
-    start, end = _date_window(selected_date=selected_date, from_date=from_date)
-    frame = frame[pd.to_datetime(frame["Date"]) <= end].sort_values(by="Date").copy()
-    if frame.empty:
-        return []
-
-    value_columns = ["Estimated Equity", "Cumulative Net Cash Flow", "Total P/L"]
-    baseline_candidates = frame[pd.to_datetime(frame["Date"]) < start]
-    if baseline_candidates.empty:
-        baseline = {column: 0.0 for column in value_columns}
-    else:
-        baseline_row = baseline_candidates.iloc[-1]
-        baseline = {column: float(baseline_row[column]) for column in value_columns}
-
-    period = frame[
-        (pd.to_datetime(frame["Date"]) >= start) & (pd.to_datetime(frame["Date"]) <= end)
-    ].copy()
-    for column in value_columns:
-        period[column] = pd.to_numeric(period[column], errors="coerce").fillna(0.0)
-        period[column] = period[column] - baseline[column]
-
-    if period.empty or not (pd.to_datetime(period["Date"]) == start).any():
-        period = pd.concat(
+def _real_estate_breakdowns(data: RealEstateData) -> tuple[list[dict], list[dict]]:
+    outflows: list[dict[str, str | float]] = []
+    if not data.costs.empty:
+        costs = data.costs.groupby("Cost Type", as_index=False)["Amount"].sum()
+        for row in costs.to_dict("records"):
+            outflows.append({"label": f"Cost: {row['Cost Type']}", "value": row["Amount"]})
+    if not data.mortgages.empty:
+        payments = data.mortgages[data.mortgages["Entry Type"] == "PAYMENT"]
+        outflows.extend(
             [
-                pd.DataFrame(
-                    [
-                        {
-                            "Date": start,
-                            "Estimated Equity": 0.0,
-                            "Cumulative Net Cash Flow": 0.0,
-                            "Total P/L": 0.0,
-                        }
-                    ]
-                ),
-                period,
-            ],
-            ignore_index=True,
+                {"label": "Mortgage Interest", "value": float(payments["Interest Paid"].sum())},
+                {"label": "Mortgage Repayment", "value": float(payments["Principal Repaid"].sum())},
+            ]
         )
+    inflows = (
+        data.inflows.groupby("Inflow Type", as_index=False)["Amount"]
+        .sum()
+        .rename(columns={"Inflow Type": "label", "Amount": "value"})
+        if not data.inflows.empty
+        else pd.DataFrame(columns=["label", "value"])
+    )
+    return [row for row in outflows if row["value"]], records(inflows[inflows["value"] != 0])
 
-    return _records(period.sort_values(by="Date").drop_duplicates(subset=["Date"], keep="last"))
+
+def _profit_loss_history(
+    equity: pd.DataFrame, cashflow: pd.DataFrame, from_date: str, selected_date: str
+) -> list[dict[str, Any]]:
+    left = equity[["Date", "Estimated Equity"]]
+    right = cashflow[["Date", "Cumulative Net Cash Flow"]]
+    history = pd.merge(left, right, on="Date", how="outer").sort_values("Date")
+    if history.empty:
+        return []
+    value_columns = ["Estimated Equity", "Cumulative Net Cash Flow"]
+    history[value_columns] = history[value_columns].ffill().fillna(0.0)
+    history["Total P/L"] = history[value_columns].sum(axis=1)
+    baseline = history[history["Date"] < pd.Timestamp(from_date)].tail(1)
+    columns = [*value_columns, "Total P/L"]
+    old = baseline.iloc[0] if not baseline.empty else {column: 0 for column in columns}
+    history = _period(history, from_date, selected_date)
+    for column in columns:
+        history[column] -= old[column]
+    return records(history)
 
 
-def build_real_estate_payload(
-    *,
-    selected_date: str,
-    from_date: str | None,
-    asset: str,
-    outflow_limit: int | str | None,
-    inflow_limit: int | str | None,
-) -> dict[str, Any]:
-    from_date, selected_date = _date_window_strings(
-        selected_date=selected_date,
-        from_date=from_date,
+def build_real_estate_payload(*, selected_date: str, from_date: str) -> dict[str, Any]:
+    data = load_real_estate_data(selected_date)
+    period_data = data.period(from_date, selected_date)
+    metrics = snapshot_metrics(data)
+    metric_values = (
+        ("Property Value", metrics["property_value"]),
+        ("Outstanding Mortgage", metrics["outstanding_mortgage"]),
+        ("Estimated Equity", metrics["estimated_equity"]),
+        ("Net Cash Out", period_net_cash_out(period_data)),
     )
-    bundle = load_real_estate_bundle(asof_date=selected_date)
-    costs = filter_asset(frame=bundle.costs, asset=asset)
-    inflows = filter_asset(frame=bundle.inflows, asset=asset)
-    values = filter_asset(frame=bundle.values, asset=asset)
-    mortgages = filter_asset(frame=bundle.mortgages, asset=asset)
-    period_costs = _filter_period_rows(
-        costs,
-        from_date=from_date,
-        selected_date=selected_date,
-    )
-    period_inflows = _filter_period_rows(
-        inflows,
-        from_date=from_date,
-        selected_date=selected_date,
-    )
-    period_mortgages = _filter_period_rows(
-        mortgages,
-        from_date=from_date,
-        selected_date=selected_date,
-    )
-
-    metrics = calculate_snapshot_metrics(
-        costs=costs,
-        inflows=inflows,
-        values=values,
-        mortgages=mortgages,
-    )
-    period_net_cash_out = _real_estate_period_net_cash_out(
-        costs=period_costs,
-        inflows=period_inflows,
-        mortgages=period_mortgages,
-    )
-    lifetime_cashflow = build_monthly_cashflow_frame(
-        costs=costs,
-        inflows=inflows,
-        mortgages=mortgages,
-    )
-    monthly_cashflow = build_monthly_cashflow_frame(
-        costs=period_costs,
-        inflows=period_inflows,
-        mortgages=period_mortgages,
-    )
-    mortgage_balance = _filter_period_rows(
-        build_mortgage_balance_frame(mortgages=mortgages),
-        from_date=from_date,
-        selected_date=selected_date,
-    )
-    value_equity_full = build_value_equity_frame(
-        values=values,
-        mortgages=mortgages,
-        asof_date=selected_date,
-    )
-    value_equity = _filter_period_rows(
-        value_equity_full,
-        from_date=from_date,
-        selected_date=selected_date,
-    )
-    mortgage_summary = summarize_mortgages_from_rows(mortgages=mortgages)
-    recent_outflows = build_recent_outflows_frame(
-        costs=costs,
-        mortgages=mortgages,
-        n=_resolve_limit(outflow_limit),
-    )
-    recent_inflows = build_recent_inflows_frame(inflows=inflows, n=_resolve_limit(inflow_limit))
-
+    equity = value_equity(data, selected_date)
+    cashflow = monthly_cashflow(data)
+    outflows, inflows = _real_estate_breakdowns(period_data)
+    recent_outflows, recent_inflows = recent_cashflows(data, PAGE_SIZE)
+    dated = [
+        frame["Date"]
+        for frame in (data.costs, data.inflows, data.values, data.mortgages)
+        if not frame.empty
+    ]
     return {
-        "title": "Real Estate" if asset == "ALL" else asset,
-        "asOfDate": selected_date,
-        "fromDate": from_date,
-        "startDate": _real_estate_start_date(costs, inflows, values, mortgages) or selected_date,
-        "summary": {
-            "title": "Real Estate",
-            "metrics": [
-                {
-                    "label": "Property Value",
-                    "value": metrics["property_value"],
-                    "display": _currency(metrics["property_value"]),
-                },
-                {
-                    "label": "Outstanding Mortgage",
-                    "value": metrics["outstanding_mortgage"],
-                    "display": _currency(metrics["outstanding_mortgage"]),
-                },
-                {
-                    "label": "Estimated Equity",
-                    "value": metrics["estimated_equity"],
-                    "display": _currency(metrics["estimated_equity"]),
-                },
-                {
-                    "label": "Net Cash Out",
-                    "value": period_net_cash_out,
-                    "display": _currency(period_net_cash_out),
-                },
-            ],
-        },
-        "valueEquity": _records(value_equity),
-        "cashflow": _records(monthly_cashflow),
-        "plBreakdown": _real_estate_period_pl_breakdown(
-            value_equity=value_equity_full,
-            monthly_cashflow=lifetime_cashflow,
-            from_date=from_date,
-            selected_date=selected_date,
+        "startDate": pd.concat(dated).min().strftime("%Y-%m-%d") if dated else selected_date,
+        "metrics": [
+            {"label": label, "value": value, "display": currency(value)}
+            for label, value in metric_values
+        ],
+        "valueEquity": records(_period(equity, from_date, selected_date)),
+        "cashflow": records(_period(monthly_cashflow(period_data), from_date, selected_date)),
+        "profitLoss": _profit_loss_history(equity, cashflow, from_date, selected_date),
+        "mortgageBalances": records(
+            _period(mortgage_balances(data.mortgages), from_date, selected_date)
         ),
-        "mortgageBalance": _records(mortgage_balance),
-        "outflowBreakdown": _real_estate_outflow_breakdown(
-            costs=period_costs,
-            mortgages=period_mortgages,
-        ),
-        "inflowBreakdown": _real_estate_inflow_breakdown(inflows=period_inflows),
-        "mortgageSummary": _real_estate_table(mortgage_summary),
-        "recentOutflows": _real_estate_table(recent_outflows),
-        "recentInflows": _real_estate_table(recent_inflows),
-        "warnings": bundle.errors,
+        "outflows": outflows,
+        "inflows": inflows,
+        "mortgages": table(mortgage_summary(data.mortgages)),
+        "recentOutflows": table(recent_outflows),
+        "recentInflows": table(recent_inflows),
     }
-
-
-def package_root() -> Path:
-    return Path(__file__).parents[2]

@@ -434,21 +434,6 @@ h2 {
   color: #ff6b91;
 }
 
-.metric.status-ok strong,
-.statusText.status-ok {
-  color: #b7ff5a;
-}
-
-.metric.status-warn strong,
-.statusText.status-warn {
-  color: #f6d45d;
-}
-
-.metric.status-crit strong,
-.statusText.status-crit {
-  color: #ff6b91;
-}
-
 .chartGrid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);

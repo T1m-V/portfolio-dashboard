@@ -76,10 +76,6 @@ class RefreshJobManager:
         ).start()
         return job.as_dict()
 
-    def list(self) -> list[dict[str, object]]:
-        with self._lock:
-            return [self._jobs[job_id].as_dict() for job_id in reversed(self._job_order)]
-
     def get(self, job_id: str) -> dict[str, object] | None:
         with self._lock:
             job = self._jobs.get(job_id)

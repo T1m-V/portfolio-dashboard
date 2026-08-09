@@ -11,7 +11,6 @@ export type Metric = {
   label: string;
   value: number;
   display: string;
-  status?: "OK" | "WARN" | "CRIT" | string;
 };
 
 export type TablePayload = {
@@ -31,84 +30,43 @@ export type CompositionPayload =
 
 export type InvestmentPayload = {
   title: string;
-  asOfDate: string;
-  fromDate: string;
   startDate: string;
-  summary: {
-    title: string;
-    empty?: boolean;
-    currentValue?: number;
-    profitLoss?: number;
-    metrics: Metric[];
-  };
+  metrics: Metric[];
   composition: CompositionPayload;
   history: Record<string, string | number | null>[];
   transactions: TablePayload;
 };
 
 export type RealEstatePayload = {
-  title: string;
-  asOfDate: string;
-  fromDate: string;
   startDate: string;
-  summary: {
-    title: string;
-    metrics: Metric[];
-  };
+  metrics: Metric[];
   valueEquity: Record<string, string | number | null>[];
   cashflow: Record<string, string | number | null>[];
-  plBreakdown: Record<string, string | number | null>[];
-  mortgageBalance: Record<string, string | number | null>[];
-  outflowBreakdown: BreakdownItem[];
-  inflowBreakdown: BreakdownItem[];
-  mortgageSummary: TablePayload;
+  profitLoss: Record<string, string | number | null>[];
+  mortgageBalances: Record<string, string | number | null>[];
+  outflows: BreakdownItem[];
+  inflows: BreakdownItem[];
+  mortgages: TablePayload;
   recentOutflows: TablePayload;
   recentInflows: TablePayload;
-  warnings: string[];
 };
 
 export type ArbitrumPayload = {
   title: string;
-  fromDate: string;
   startDate: string;
-  currency: "EUR" | "USD" | string;
-  mode: "full" | "name" | string;
-  selection: string;
-  summary: {
-    title: string;
-    empty?: boolean;
-    currentValue?: number;
-    profitLoss?: number;
-    metrics: Metric[];
-  };
-  transactionsDaily: Record<string, string | number | null>[];
-  valueHistory: Record<string, string | number | null>[];
+  metrics: Metric[];
+  transactionHistory: Record<string, string | number | null>[];
+  history: Record<string, string | number | null>[];
   composition: CompositionPayload;
-  sourceBreakdown: TablePayload;
+  sources: TablePayload;
   transactions: TablePayload;
   warnings: string[];
 };
 
 export type OptionsPayload = {
-  stocks: {
-    analysisModes: Option[];
-    compositionModes: Option[];
-    assets: Option[];
-  };
-  nexo: {
-    analysisModes: Option[];
-    compositionModes: Option[];
-    assets: Option[];
-  };
-  arbitrum: {
-    analysisModes: Option[];
-    compositionModes: Option[];
-    assets: Option[];
-    currencies: Option[];
-  };
-  realEstate: {
-    assets: Option[];
-  };
+  stocks: Option[];
+  nexo: Option[];
+  arbitrum: Option[];
 };
 
 export type RefreshKind = "prices" | "transactions" | "crypto" | "all";

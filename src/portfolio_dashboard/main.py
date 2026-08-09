@@ -75,11 +75,6 @@ def create_app(
         except RefreshAlreadyRunningError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
-    @app.get("/api/refresh/jobs")
-    def list_refresh_jobs(request: Request) -> list[dict[str, object]]:
-        require_local_request(request)
-        return job_manager.list()
-
     @app.get("/api/refresh/jobs/{job_id}")
     def get_refresh_job(job_id: str, request: Request) -> dict[str, object]:
         require_local_request(request)
@@ -94,16 +89,16 @@ def create_app(
     @app.get("/api/stocks")
     def stocks(
         date_: date = Query(alias="date"),
-        from_date: date | None = Query(default=None, alias="fromDate"),
-        mode: Literal["full", "group", "region", "provider", "name"] = "full",
-        selection: str = "",
+        from_date: date = Query(alias="fromDate"),
+        dimension: Literal["group", "region", "provider", "name"] = "group",
+        selection: str = "ALL",
         composition: Literal["name", "group", "region", "provider"] = "name",
     ) -> dict:
         with context.activate():
             return build_stock_payload(
                 selected_date=date_.isoformat(),
-                from_date=from_date.isoformat() if from_date else None,
-                mode=mode,
+                from_date=from_date.isoformat(),
+                dimension=dimension,
                 selection=selection,
                 composition=composition,
             )
@@ -111,57 +106,44 @@ def create_app(
     @app.get("/api/nexo")
     def nexo(
         date_: date = Query(alias="date"),
-        from_date: date | None = Query(default=None, alias="fromDate"),
-        mode: Literal["full", "group", "currency", "name"] = "full",
-        selection: str = "",
-        composition: Literal["name", "group", "currency"] = "name",
+        from_date: date = Query(alias="fromDate"),
+        coin: str = "ALL",
     ) -> dict:
         with context.activate():
             return build_nexo_payload(
                 selected_date=date_.isoformat(),
-                from_date=from_date.isoformat() if from_date else None,
-                mode=mode,
-                selection=selection,
-                composition=composition,
+                from_date=from_date.isoformat(),
+                coin=coin,
             )
 
     @app.get("/api/arbitrum")
     def arbitrum(
         date_: date = Query(alias="date"),
-        from_date: date | None = Query(default=None, alias="fromDate"),
-        mode: Literal["full", "name"] = "full",
-        selection: str = "",
+        from_date: date = Query(alias="fromDate"),
+        asset: str = "ALL",
         composition: Literal["name", "route", "exposure"] = "name",
         currency: Literal["EUR", "USD"] = "EUR",
     ) -> dict:
         with context.activate():
             return build_arbitrum_payload(
                 selected_date=date_.isoformat(),
-                from_date=from_date.isoformat() if from_date else None,
-                mode=mode,
-                selection=selection,
+                from_date=from_date.isoformat(),
+                asset=asset,
                 composition=composition,
-                currency=currency,
+                currency_unit=currency,
             )
 
     @app.get("/api/real-estate")
     def real_estate(
         date_: date = Query(alias="date"),
-        from_date: date | None = Query(default=None, alias="fromDate"),
-        asset: str = "ALL",
-        outflowLimit: int | str = 5,
-        inflowLimit: int | str = 5,
+        from_date: date = Query(alias="fromDate"),
     ) -> dict:
         with context.activate():
             return build_real_estate_payload(
                 selected_date=date_.isoformat(),
-                from_date=from_date.isoformat() if from_date else None,
-                asset=asset,
-                outflow_limit=outflowLimit,
-                inflow_limit=inflowLimit,
+                from_date=from_date.isoformat(),
             )
 
     static_root = Path(__file__).with_name("static")
-    if static_root.exists():
-        app.mount("/", StaticFiles(directory=static_root, html=True), name="frontend")
+    app.mount("/", StaticFiles(directory=static_root, html=True), name="frontend")
     return app
