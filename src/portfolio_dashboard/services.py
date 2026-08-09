@@ -91,6 +91,7 @@ def build_options_payload() -> dict[str, list[dict[str, str]]]:
             "provider": info["provider"],
         }
         for isin, info in context.stock_metadata().items()
+        if get_stock_start_date(context=context, isins=[isin]) is not None
     ]
     metadata = context.currency_metadata()
     nexo = [

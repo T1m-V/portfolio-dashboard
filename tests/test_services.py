@@ -26,11 +26,22 @@ def test_options_payload_contains_only_data_driven_assets(monkeypatch) -> None:
                 "group": "Stocks",
                 "region": "EUROPE",
                 "provider": "Direct",
-            }
+            },
+            "BBB": {
+                "name": "Prices Only",
+                "group": "Funds/ETFs",
+                "region": "GLOBAL",
+                "provider": "External",
+            },
         },
         currency_metadata=lambda: {"BTC": {"name": "Bitcoin"}},
     )
     monkeypatch.setattr(services, "active_context", lambda: context)
+    monkeypatch.setattr(
+        services,
+        "get_stock_start_date",
+        lambda *, context, isins: "2024-01-01" if isins == ["AAA"] else None,
+    )
     monkeypatch.setattr(services, "list_nexo_coins", lambda: ["BTC"])
     monkeypatch.setattr(
         services,
