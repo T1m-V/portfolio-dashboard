@@ -422,8 +422,9 @@ h2 {
 .metric strong {
   display: block;
   margin-top: 18px;
-  font-size: clamp(18px, 2vw, 28px);
+  font-size: clamp(18px, 1.65vw, 26px);
   line-height: 1;
+  white-space: nowrap;
 }
 
 .positive {
@@ -681,5 +682,481 @@ tr:hover td {
 
   h1 {
     font-size: 42px;
+  }
+}
+
+/* Product-shell refinements */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mobileMenuButton,
+.iconButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  color: #d9e8e3;
+  border: 1px solid rgba(232, 255, 248, 0.12);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+}
+
+.navDrawer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebarUtilities {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 22px;
+  border-top: 1px solid rgba(232, 255, 248, 0.08);
+}
+
+.sidebarUtilities button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  color: #9eacb9;
+  border: 1px solid rgba(232, 255, 248, 0.09);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebarUtilities button:hover {
+  color: #e8fff8;
+  border-color: rgba(45, 242, 201, 0.3);
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: #f6d45d;
+  box-shadow: 0 0 10px rgba(246, 212, 93, 0.7);
+}
+
+.statusPill {
+  display: grid;
+  gap: 4px;
+  min-width: 164px;
+  padding: 10px 14px;
+  text-align: left;
+  text-transform: none;
+}
+
+.statusPill span {
+  color: #7d8b9f;
+  font-size: 9px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.statusPill strong {
+  color: #b7ff5a;
+  font-size: 12px;
+}
+
+.statusPill.loading strong {
+  color: #f6d45d;
+}
+
+.periodContext {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px 20px;
+  margin-top: -8px;
+  padding: 0 2px;
+  color: #7d8b9f;
+  font-size: 12px;
+}
+
+.periodContext strong {
+  color: #b8c7d3;
+  font-weight: 600;
+}
+
+.contentState {
+  display: grid;
+  gap: 20px;
+  transition: opacity 180ms ease, filter 180ms ease;
+}
+
+.contentState.isLoading {
+  opacity: 0.42;
+  filter: saturate(0.7);
+  pointer-events: none;
+}
+
+.metricStrip {
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+}
+
+.metric {
+  min-height: 132px;
+}
+
+.metric strong.neutral,
+.neutral {
+  color: #e8fff8;
+}
+
+.metric small {
+  display: block;
+  max-width: 240px;
+  margin-top: 11px;
+  color: #718091;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.legendList strong small {
+  margin-left: 5px;
+  color: #718091;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.overviewRail {
+  grid-template-columns: repeat(2, minmax(180px, 260px));
+}
+
+.overviewGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 20px;
+}
+
+.balanceBridge {
+  display: grid;
+  gap: 1px;
+}
+
+.balanceBridge > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 72px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.balanceBridge span {
+  color: #7d8b9f;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.balanceBridge strong {
+  font-size: 18px;
+}
+
+.balanceBridge .balanceTotal {
+  margin-top: 10px;
+  border-top: 1px solid rgba(183, 255, 90, 0.25);
+  background: rgba(183, 255, 90, 0.07);
+}
+
+.balanceBridge .balanceTotal strong {
+  color: #b7ff5a;
+}
+
+.accountGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.accountGrid button {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 17px;
+  color: #e8fff8;
+  border: 1px solid rgba(232, 255, 248, 0.09);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  text-align: left;
+  transition: 160ms ease;
+}
+
+.accountGrid button:hover {
+  border-color: rgba(45, 242, 201, 0.35);
+  background: rgba(45, 242, 201, 0.06);
+  transform: translateY(-2px);
+}
+
+.accountGrid span {
+  color: #7d8b9f;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.accountGrid strong {
+  font-size: 20px;
+}
+
+.accountGrid small {
+  color: #7d8b9f;
+  line-height: 1.35;
+}
+
+.hashLink {
+  color: #2df2c9;
+  text-decoration: none;
+}
+
+.hashLink:hover {
+  text-decoration: underline;
+}
+
+.emptyValue {
+  color: #526071;
+}
+
+.privacyMode .metric strong,
+.privacyMode .legendList strong,
+.privacyMode .accountGrid strong,
+.privacyMode .accountGrid small.positive,
+.privacyMode .accountGrid small.negative,
+.privacyMode .balanceBridge strong,
+.privacyMode table td:not(:first-child) {
+  filter: blur(7px);
+  user-select: none;
+}
+
+.modalBackdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.dataModal {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid rgba(232, 255, 248, 0.15);
+  background: #071013;
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.6);
+}
+
+.dataModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dataModalHeader h2 {
+  font-size: 24px;
+}
+
+.dataModal .iconButton {
+  display: inline-flex;
+}
+
+.dataModalIntro {
+  margin: 18px 0;
+  color: #8fa0b2;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dataModal .refreshControls {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dataSectionLabel {
+  color: #7d8b9f;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dangerZone {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(246, 212, 93, 0.14);
+}
+
+.dangerZone .serverStop {
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .sidebar {
+    position: sticky;
+    z-index: 30;
+    top: 0;
+    display: block;
+    height: auto;
+    padding: 12px 18px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(232, 255, 248, 0.1);
+  }
+
+  .brand {
+    padding: 0;
+  }
+
+  .mobileMenuButton {
+    display: inline-flex;
+  }
+
+  .navDrawer {
+    display: none;
+    padding-top: 14px;
+  }
+
+  .navDrawer.open {
+    display: grid;
+    gap: 12px;
+  }
+
+  .navDrawer nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sidebarUtilities {
+    grid-template-columns: 1fr 1fr;
+    margin: 0;
+    padding-top: 12px;
+  }
+
+  .overviewGrid,
+  .accountGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .metricStrip {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .mainStage {
+    padding: 16px;
+  }
+
+  .navDrawer nav {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .workspaceHeader {
+    gap: 14px;
+  }
+
+  .workspaceHeader h1 {
+    font-size: 38px;
+  }
+
+  .statusPill {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .overviewRail,
+  .overviewGrid,
+  .accountGrid,
+  .sidebarUtilities {
+    grid-template-columns: 1fr;
+  }
+
+  .metricStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .periodContext {
+    display: grid;
+  }
+
+  .panelAction {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .panelTitle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tableWrap {
+    overflow: visible;
+  }
+
+  table {
+    min-width: 0;
+  }
+
+  thead {
+    display: none;
+  }
+
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  tr {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border: 1px solid rgba(232, 255, 248, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  td {
+    display: grid;
+    grid-template-columns: minmax(96px, 0.42fr) minmax(0, 1fr);
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(232, 255, 248, 0.05);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  td::before {
+    content: attr(data-label);
+    color: #7d8b9f;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  td:last-child {
+    border-bottom: 0;
   }
 }
