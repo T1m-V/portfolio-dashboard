@@ -1,13 +1,10 @@
-import { AnimatePresence, motion } from "framer-motion";
 import {
   Area,
-  AreaChart,
   Bar,
-  BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -63,7 +60,29 @@ const tabs: { key: TabKey; label: string; icon: typeof WalletCards }[] = [
   { key: "realEstate", label: "Real Estate", icon: Building2 }
 ];
 
-const fullPortfolioOption: Option = { label: "Full Portfolio", value: "full" };
+const ALL = "ALL";
+const allOption: Option = { label: "All", value: ALL };
+const stockDimensions: Option[] = [
+  { label: "Asset Group", value: "group" },
+  { label: "Region", value: "region" },
+  { label: "Provider", value: "provider" },
+  { label: "Single Asset", value: "name" }
+];
+const stockCompositions: Option[] = [
+  { label: "Asset Name", value: "name" },
+  { label: "Asset Group", value: "group" },
+  { label: "Region", value: "region" },
+  { label: "Provider", value: "provider" }
+];
+const arbitrumCompositions: Option[] = [
+  { label: "Asset Name", value: "name" },
+  { label: "Valuation Route", value: "route" },
+  { label: "Exposure Type", value: "exposure" }
+];
+const currencies: Option[] = [
+  { label: "EUR", value: "EUR" },
+  { label: "USD", value: "USD" }
+];
 const accentColors = ["#2df2c9", "#b7ff5a", "#7aa7ff", "#ff63a5", "#f6d45d", "#9c7bff"];
 const valueColumnTokens = [
   "amount",
@@ -174,9 +193,6 @@ function formatValue(value: unknown): string {
 }
 
 function formatMetric(metric: Metric): string {
-  if (metric.status) {
-    return metric.display;
-  }
   const currencyPrefix = metric.display.match(/^[A-Z]{3}\s/)?.[0] ?? "";
   return `${currencyPrefix}${formatValue(metric.value)}`;
 }
@@ -202,8 +218,8 @@ function optionValue(options: Option[], current: string): string {
   return options[0]?.value ?? "";
 }
 
-function withFullPortfolio(options: Option[]): Option[] {
-  return [fullPortfolioOption, ...options.filter((option) => option.value !== fullPortfolioOption.value)];
+function withAll(options: Option[]): Option[] {
+  return [allOption, ...options.filter((option) => option.value !== allOption.value)];
 }
 
 function groupsForMode(options: Option[], mode: string): Option[] {
@@ -331,21 +347,13 @@ function MetricStrip({ metrics }: { metrics: Metric[] }) {
   }
   return (
     <section className="metricStrip">
-      {metrics.map((metric, index) => {
+      {metrics.map((metric) => {
         const negative = metric.value < 0;
-        const status = metric.status?.toLowerCase();
         return (
-          <motion.div
-            className={`metric ${status ? `status-${status}` : ""}`}
-            key={metric.label}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.04 }}
-            whileHover={{ y: -3 }}
-          >
+          <div className="metric" key={metric.label}>
             <span>{metric.label}</span>
             <strong className={negative ? "negative" : "positive"}>{formatMetric(metric)}</strong>
-          </motion.div>
+          </div>
         );
       })}
     </section>
@@ -452,30 +460,18 @@ function InvestmentCharts({
   payload: InvestmentPayload;
   compositionControl?: React.ReactNode;
 }) {
-  const history = payload.history;
   return (
     <div className="chartGrid">
       <Panel title="Performance" icon={<Activity size={18} />}>
-        {history.length ? (
-          <ResponsiveContainer height={340}>
-            <AreaChart data={history}>
-              <defs>
-                <linearGradient id="marketValue" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="5%" stopColor="#2df2c9" stopOpacity={0.45} />
-                  <stop offset="95%" stopColor="#2df2c9" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-              <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-              <Tooltip {...chartTooltip()} />
-              <Area dataKey="Market Value" stroke="#2df2c9" fill="url(#marketValue)" strokeWidth={2.5} />
-              <Line dataKey="Invested Capital" stroke="#b7ff5a" strokeDasharray="5 5" dot={false} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyState label="No performance history." />
-        )}
+        <TimeChart
+          data={payload.history}
+          emptyLabel="No performance history."
+          height={340}
+          series={[
+            { key: "Market Value", color: "#2df2c9", kind: "area" },
+            { key: "Invested Capital", color: "#b7ff5a", dashed: true }
+          ]}
+        />
       </Panel>
 
       <Panel title="Composition" icon={<Layers3 size={18} />} action={compositionControl}>
@@ -483,41 +479,21 @@ function InvestmentCharts({
       </Panel>
 
       <Panel title="Profit/Loss" icon={<Gauge size={18} />}>
-        {history.length ? (
-          <ResponsiveContainer height={260}>
-            <AreaChart data={history}>
-              <defs>
-                <linearGradient id="profitLoss" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="5%" stopColor="#b7ff5a" stopOpacity={0.38} />
-                  <stop offset="95%" stopColor="#b7ff5a" stopOpacity={0.03} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-              <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-              <Tooltip {...chartTooltip()} />
-              <Area dataKey="Profit/Loss" stroke="#b7ff5a" fill="url(#profitLoss)" strokeWidth={2.5} />
-            </AreaChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyState label="No profit/loss history." />
-        )}
+        <TimeChart
+          data={payload.history}
+          emptyLabel="No profit/loss history."
+          height={260}
+          series={[{ key: "Profit/Loss", color: "#b7ff5a", kind: "area" }]}
+        />
       </Panel>
 
       <Panel title="Quantity" icon={<RefreshCcw size={18} />}>
-        {history.length ? (
-          <ResponsiveContainer height={260}>
-            <LineChart data={history}>
-              <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-              <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-              <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatNumber} tickLine={false} axisLine={false} />
-              <Tooltip {...chartTooltip()} />
-              <Line dataKey="Quantity" stroke="#7aa7ff" dot={false} strokeWidth={2.5} />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <EmptyState label="No quantity history." />
-        )}
+        <TimeChart
+          data={payload.history}
+          emptyLabel="No quantity history."
+          height={260}
+          series={[{ key: "Quantity", color: "#7aa7ff" }]}
+        />
       </Panel>
     </div>
   );
@@ -611,45 +587,32 @@ function ArbitrumDashboard({
   onPeriodChange: (period: Exclude<PeriodKey, "custom">) => void;
   onStartDateChange: (date: string | null) => void;
 }) {
-  const optionSet = options.arbitrum;
-  const [selection, setSelection] = useState("full");
+  const [asset, setAsset] = useState(ALL);
   const [composition, setComposition] = useState("name");
   const [currency, setCurrency] = useState("EUR");
   const [payload, setPayload] = useState<ArbitrumPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const selectionOptions = useMemo(
-    () => withFullPortfolio(optionSet.assets),
-    [optionSet.assets]
-  );
-  const compositionOptions = optionSet.compositionModes;
-  const mode = selection === fullPortfolioOption.value ? "full" : "name";
-  const requestSelection = selection === fullPortfolioOption.value ? "" : selection;
-  const selectionReady = selectionOptions.some((option) => option.value === selection);
+  const assetOptions = useMemo(() => withAll(options.arbitrum), [options.arbitrum]);
 
   useEffect(() => {
-    setSelection(optionValue(selectionOptions, selection));
-  }, [selectionOptions, selection]);
+    setAsset(optionValue(assetOptions, asset));
+  }, [assetOptions, asset]);
 
   useEffect(() => {
-    setComposition(optionValue(compositionOptions, composition));
-  }, [compositionOptions, composition]);
+    setComposition(optionValue(arbitrumCompositions, composition));
+  }, [composition]);
 
   useEffect(() => {
-    setCurrency(optionValue(optionSet.currencies, currency));
-  }, [optionSet.currencies, currency]);
+    setCurrency(optionValue(currencies, currency));
+  }, [currency]);
 
   useEffect(() => {
-    if (!selectionReady) {
-      return;
-    }
-
     const params = new URLSearchParams({
       date,
       fromDate,
-      mode,
-      selection: requestSelection,
+      asset,
       composition,
       currency
     });
@@ -676,11 +639,11 @@ function ArbitrumDashboard({
     return () => {
       activeRequest = false;
     };
-  }, [date, fromDate, mode, requestSelection, composition, currency, selectionReady]);
+  }, [date, fromDate, asset, composition, currency]);
 
   useEffect(() => {
     onStartDateChange(null);
-  }, [mode, requestSelection, onStartDateChange]);
+  }, [asset, onStartDateChange]);
 
   useEffect(() => {
     if (payload?.startDate) {
@@ -689,7 +652,7 @@ function ArbitrumDashboard({
   }, [payload?.startDate, onStartDateChange]);
 
   return (
-    <motion.div className="workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+    <div className="workspace">
       <div className="workspaceHeader">
         <div>
           <p className="eyebrow">On-chain portfolio</p>
@@ -705,9 +668,9 @@ function ArbitrumDashboard({
       <section className="filterRail arbitrumRail">
         <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
         <DateField label="To date" value={date} onChange={onAsOfDateChange} />
-        <SelectField label="Selection" value={selection} options={selectionOptions} onChange={setSelection} />
-        <SelectField label="Composition" value={composition} options={compositionOptions} onChange={setComposition} />
-        <SegmentedControl label="Currency" value={currency} options={optionSet.currencies} onChange={setCurrency} />
+        <SelectField label="Asset" value={asset} options={assetOptions} onChange={setAsset} />
+        <SelectField label="Composition" value={composition} options={arbitrumCompositions} onChange={setComposition} />
+        <SegmentedControl label="Currency" value={currency} options={currencies} onChange={setCurrency} />
       </section>
 
       {error ? <div className="warning">{error}</div> : null}
@@ -717,29 +680,17 @@ function ArbitrumDashboard({
 
       {payload ? (
         <>
-          <MetricStrip metrics={payload.summary.metrics} />
+          <MetricStrip metrics={payload.metrics} />
           <div className="chartGrid">
             <Panel title="Portfolio Value" icon={<Activity size={18} />}>
-              {payload.valueHistory.length ? (
-                <ResponsiveContainer height={300}>
-                  <AreaChart data={payload.valueHistory}>
-                    <defs>
-                      <linearGradient id="arbValue" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="5%" stopColor="#2df2c9" stopOpacity={0.42} />
-                        <stop offset="95%" stopColor="#2df2c9" stopOpacity={0.03} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-                    <Tooltip {...chartTooltip()} />
-                    <Area dataKey="Market Value" stroke="#2df2c9" fill="url(#arbValue)" strokeWidth={2.5} />
-                    <Line dataKey="Invested Capital" stroke="#b7ff5a" dot={false} strokeDasharray="5 5" strokeWidth={2} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No value history." />
-              )}
+              <TimeChart
+                data={payload.history}
+                emptyLabel="No value history."
+                series={[
+                  { key: "Market Value", color: "#2df2c9", kind: "area" },
+                  { key: "Invested Capital", color: "#b7ff5a", dashed: true }
+                ]}
+              />
             </Panel>
 
             <Panel title="Composition" icon={<Layers3 size={18} />}>
@@ -747,61 +698,33 @@ function ArbitrumDashboard({
             </Panel>
 
             <Panel title="Profit/Loss" icon={<Gauge size={18} />}>
-              {payload.valueHistory.length ? (
-                <ResponsiveContainer height={260}>
-                  <AreaChart data={payload.valueHistory}>
-                    <defs>
-                      <linearGradient id="arbProfitLoss" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="5%" stopColor="#b7ff5a" stopOpacity={0.38} />
-                        <stop offset="95%" stopColor="#b7ff5a" stopOpacity={0.03} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-                    <Tooltip {...chartTooltip()} />
-                    <Area dataKey="Profit/Loss" stroke="#b7ff5a" fill="url(#arbProfitLoss)" strokeWidth={2.5} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No profit/loss history." />
-              )}
+              <TimeChart
+                data={payload.history}
+                emptyLabel="No profit/loss history."
+                height={260}
+                series={[{ key: "Profit/Loss", color: "#b7ff5a", kind: "area" }]}
+              />
             </Panel>
 
-            <Panel title={mode === "name" ? "Quantity" : "Transaction Activity"} icon={<RefreshCcw size={18} />}>
-              {mode === "name" ? (
-                payload.valueHistory.length ? (
-                  <ResponsiveContainer height={260}>
-                    <LineChart data={payload.valueHistory}>
-                      <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                      <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatNumber} tickLine={false} axisLine={false} />
-                      <Tooltip {...chartTooltip()} />
-                      <Line dataKey="Quantity" stroke="#7aa7ff" dot={false} strokeWidth={2.5} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <EmptyState label="No quantity history." />
-                )
-              ) : payload.transactionsDaily.length ? (
-                <ResponsiveContainer height={260}>
-                  <BarChart data={payload.transactionsDaily}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <Tooltip {...chartTooltip()} />
-                    <Bar dataKey="Tx Count" fill="#7aa7ff" radius={[5, 5, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No transaction activity." />
-              )}
+            <Panel title={asset !== ALL ? "Quantity" : "Transaction Activity"} icon={<RefreshCcw size={18} />}>
+              <TimeChart
+                data={asset !== ALL ? payload.history : payload.transactionHistory}
+                emptyLabel={asset !== ALL ? "No quantity history." : "No transaction activity."}
+                height={260}
+                series={[
+                  {
+                    key: asset !== ALL ? "Quantity" : "Tx Count",
+                    color: "#7aa7ff",
+                    kind: asset !== ALL ? "line" : "bar"
+                  }
+                ]}
+              />
             </Panel>
           </div>
           <div className="tableStack">
-            {mode === "name" ? (
+            {asset !== ALL ? (
               <Panel title="Sources" icon={<Layers3 size={18} />}>
-                <DataTable table={payload.sourceBreakdown} emptyLabel="No source breakdown." />
+                <DataTable table={payload.sources} emptyLabel="No source breakdown." />
               </Panel>
             ) : null}
             <Panel title="Latest Transactions">
@@ -812,7 +735,57 @@ function ArbitrumDashboard({
       ) : (
         <EmptyState label="Loading Arbitrum portfolio." />
       )}
-    </motion.div>
+    </div>
+  );
+}
+
+type ChartSeries = {
+  key: string;
+  color: string;
+  kind?: "area" | "bar" | "line";
+  dashed?: boolean;
+  prominent?: boolean;
+};
+
+function TimeChart({
+  data,
+  series,
+  emptyLabel,
+  height = 300
+}: {
+  data: Record<string, string | number | null>[];
+  series: ChartSeries[];
+  emptyLabel: string;
+  height?: number;
+}) {
+  if (!data.length) {
+    return <EmptyState label={emptyLabel} />;
+  }
+  return (
+    <ResponsiveContainer height={height}>
+      <ComposedChart data={data}>
+        <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
+        <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
+        <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
+        <Tooltip {...chartTooltip()} />
+        {series.map(({ key, color, kind = "line", dashed, prominent }) =>
+          kind === "area" ? (
+            <Area dataKey={key} fill={color} fillOpacity={0.18} key={key} stroke={color} strokeWidth={2.5} />
+          ) : kind === "bar" ? (
+            <Bar dataKey={key} fill={color} key={key} radius={[5, 5, 0, 0]} />
+          ) : (
+            <Line
+              dataKey={key}
+              dot={false}
+              key={key}
+              stroke={color}
+              strokeDasharray={dashed ? "5 5" : undefined}
+              strokeWidth={prominent ? 3 : 2.5}
+            />
+          )
+        )}
+      </ComposedChart>
+    </ResponsiveContainer>
   );
 }
 
@@ -837,25 +810,22 @@ function InvestmentDashboard({
   onPeriodChange: (period: Exclude<PeriodKey, "custom">) => void;
   onStartDateChange: (date: string | null) => void;
 }) {
-  const optionSet = options[kind];
+  const assets = options[kind];
   const isStocks = kind === "stocks";
-  const [mode, setMode] = useState("group");
-  const [selection, setSelection] = useState("full");
+  const [dimension, setDimension] = useState("group");
+  const [selection, setSelection] = useState(ALL);
   const [composition, setComposition] = useState("name");
   const [payload, setPayload] = useState<InvestmentPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const selectionOptions = useMemo(
-    () => withFullPortfolio(isStocks ? groupsForMode(optionSet.assets, mode) : optionSet.assets),
-    [isStocks, optionSet.assets, mode]
+    () => withAll(isStocks ? groupsForMode(assets, dimension) : assets),
+    [isStocks, assets, dimension]
   );
-  const requestMode = selection === fullPortfolioOption.value ? "full" : isStocks ? mode : "name";
-  const requestSelection = selection === fullPortfolioOption.value ? "" : selection;
-  const selectionReady = selectionOptions.some((option) => option.value === selection);
-  const compositionOptions = optionSet.compositionModes.filter((option) => option.value !== requestMode);
+  const compositionOptions = stockCompositions.filter((option) => option.value !== dimension);
   const compositionControl =
-    isStocks && requestMode !== "name" ? (
+    isStocks && (dimension !== "name" || selection === ALL) ? (
       <SelectField
         label="Composition"
         value={composition}
@@ -873,29 +843,25 @@ function InvestmentDashboard({
   }, [compositionOptions, composition]);
 
   useEffect(() => {
-    if (!selectionReady) {
-      return;
-    }
-
-    const params = new URLSearchParams({
-      date,
-      fromDate,
-      mode: requestMode,
-      selection: requestSelection,
-      composition
-    });
+    const params = isStocks
+      ? new URLSearchParams({ date, fromDate, dimension, selection, composition })
+      : new URLSearchParams({ date, fromDate, coin: selection });
+    let activeRequest = true;
     setLoading(true);
     setError("");
     const load = kind === "stocks" ? fetchStocks : fetchNexo;
     load(params)
-      .then(setPayload)
-      .catch((reason: Error) => setError(reason.message))
-      .finally(() => setLoading(false));
-  }, [kind, date, fromDate, requestMode, requestSelection, composition, selectionReady]);
+      .then((nextPayload) => activeRequest && setPayload(nextPayload))
+      .catch((reason: Error) => activeRequest && setError(reason.message))
+      .finally(() => activeRequest && setLoading(false));
+    return () => {
+      activeRequest = false;
+    };
+  }, [kind, isStocks, date, fromDate, dimension, selection, composition]);
 
   useEffect(() => {
     onStartDateChange(null);
-  }, [kind, requestMode, requestSelection, onStartDateChange]);
+  }, [kind, dimension, selection, onStartDateChange]);
 
   useEffect(() => {
     if (payload?.startDate) {
@@ -904,7 +870,7 @@ function InvestmentDashboard({
   }, [payload?.startDate, onStartDateChange]);
 
   return (
-    <motion.div className="workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+    <div className="workspace">
       <div className="workspaceHeader">
         <div>
           <p className="eyebrow">{kind === "stocks" ? "Securities" : "Crypto credit"}</p>
@@ -921,7 +887,7 @@ function InvestmentDashboard({
         <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
         <DateField label="To date" value={date} onChange={onAsOfDateChange} />
         {isStocks ? (
-          <SelectField label="Analysis" value={mode} options={optionSet.analysisModes} onChange={setMode} />
+          <SelectField label="Analysis" value={dimension} options={stockDimensions} onChange={setDimension} />
         ) : null}
         <SelectField label="Selection" value={selection} options={selectionOptions} onChange={setSelection} />
       </section>
@@ -929,7 +895,7 @@ function InvestmentDashboard({
       {error ? <div className="warning">{error}</div> : null}
       {payload ? (
         <>
-          <MetricStrip metrics={payload.summary.metrics} />
+          <MetricStrip metrics={payload.metrics} />
           <InvestmentCharts payload={payload} compositionControl={compositionControl} />
           <Panel title="Recent Transactions">
             <DataTable
@@ -941,12 +907,11 @@ function InvestmentDashboard({
       ) : (
         <EmptyState label="Loading dashboard data." />
       )}
-    </motion.div>
+    </div>
   );
 }
 
 function RealEstateDashboard({
-  options,
   date,
   fromDate,
   period,
@@ -955,7 +920,6 @@ function RealEstateDashboard({
   onPeriodChange,
   onStartDateChange
 }: {
-  options: OptionsPayload;
   date: string;
   fromDate: string;
   period: PeriodKey;
@@ -964,27 +928,30 @@ function RealEstateDashboard({
   onPeriodChange: (period: Exclude<PeriodKey, "custom">) => void;
   onStartDateChange: (date: string | null) => void;
 }) {
-  const [asset, setAsset] = useState("ALL");
-  const [outflowLimit, setOutflowLimit] = useState("5");
-  const [inflowLimit, setInflowLimit] = useState("5");
   const [payload, setPayload] = useState<RealEstatePayload | null>(null);
   const [loading, setLoading] = useState(false);
-  const rowLimitOptions = ["5", "10", "25", "50", "100", "ALL"].map((value) => ({ label: value, value }));
+  const [error, setError] = useState("");
   const mortgageSeries = payload
-    ? pivotSeries(payload.mortgageBalance, "Mortgage ID", "Outstanding Principal")
+    ? pivotSeries(payload.mortgageBalances, "Mortgage ID", "Outstanding Principal")
     : { data: [], keys: [] };
 
   useEffect(() => {
-    const params = new URLSearchParams({ date, fromDate, asset, outflowLimit, inflowLimit });
+    const params = new URLSearchParams({ date, fromDate });
+    let activeRequest = true;
     setLoading(true);
+    setError("");
     fetchRealEstate(params)
-      .then(setPayload)
-      .finally(() => setLoading(false));
-  }, [date, fromDate, asset, outflowLimit, inflowLimit]);
+      .then((nextPayload) => activeRequest && setPayload(nextPayload))
+      .catch((reason: Error) => activeRequest && setError(reason.message))
+      .finally(() => activeRequest && setLoading(false));
+    return () => {
+      activeRequest = false;
+    };
+  }, [date, fromDate]);
 
   useEffect(() => {
     onStartDateChange(null);
-  }, [asset, onStartDateChange]);
+  }, [onStartDateChange]);
 
   useEffect(() => {
     if (payload?.startDate) {
@@ -993,11 +960,11 @@ function RealEstateDashboard({
   }, [payload?.startDate, onStartDateChange]);
 
   return (
-    <motion.div className="workspace" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+    <div className="workspace">
       <div className="workspaceHeader">
         <div>
           <p className="eyebrow">Property ledger</p>
-          <h1>{payload?.title ?? "Real Estate"}</h1>
+          <h1>Real Estate</h1>
         </div>
         <div className="statusPill">{loading ? "Syncing" : "Live"}</div>
       </div>
@@ -1006,107 +973,76 @@ function RealEstateDashboard({
         <PeriodSelector value={period} onChange={onPeriodChange} />
       </section>
 
-      <section className="filterRail">
+      <section className="filterRail compactRail">
         <DateField label="From" value={fromDate} max={date} onChange={onFromDateChange} />
         <DateField label="To date" value={date} onChange={onAsOfDateChange} />
-        <SelectField label="Asset" value={asset} options={options.realEstate.assets} onChange={setAsset} />
-        <SelectField label="Outflows" value={outflowLimit} options={rowLimitOptions} onChange={setOutflowLimit} />
-        <SelectField label="Inflows" value={inflowLimit} options={rowLimitOptions} onChange={setInflowLimit} />
       </section>
 
-      {(payload?.warnings ?? []).map((warning) => (
-        <div className="warning" key={warning}>{warning}</div>
-      ))}
+      {error ? <div className="warning">{error}</div> : null}
 
       {payload ? (
         <>
-          <MetricStrip metrics={payload.summary.metrics} />
+          <MetricStrip metrics={payload.metrics} />
           <div className="chartGrid">
             <Panel title="Value and Equity">
-              {payload.valueEquity.length ? (
-                <ResponsiveContainer height={330}>
-                  <LineChart data={payload.valueEquity}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-                    <Tooltip {...chartTooltip()} />
-                    <Line dataKey="Property Value" stroke="#2df2c9" dot={false} strokeWidth={2.5} />
-                    <Line dataKey="Outstanding Mortgage" stroke="#ff63a5" dot={false} strokeWidth={2.5} />
-                    <Line dataKey="Estimated Equity" stroke="#b7ff5a" dot={false} strokeWidth={3} />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No valuation data." />
-              )}
+              <TimeChart
+                data={payload.valueEquity}
+                emptyLabel="No valuation data."
+                height={330}
+                series={[
+                  { key: "Property Value", color: "#2df2c9" },
+                  { key: "Outstanding Mortgage", color: "#ff63a5" },
+                  { key: "Estimated Equity", color: "#b7ff5a", prominent: true }
+                ]}
+              />
             </Panel>
             <Panel title="Monthly Cashflow">
-              {payload.cashflow.length ? (
-                <ResponsiveContainer height={330}>
-                  <BarChart data={payload.cashflow}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-                    <Tooltip {...chartTooltip()} />
-                    <Bar dataKey="Inflows" fill="#2df2c9" radius={[5, 5, 0, 0]} />
-                    <Bar dataKey="Home Costs" fill="#ff63a5" radius={[5, 5, 0, 0]} />
-                    <Bar dataKey="Mortgage Interest" fill="#7aa7ff" radius={[5, 5, 0, 0]} />
-                    <Bar dataKey="Mortgage Repayment" fill="#f6d45d" radius={[5, 5, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No cashflow data." />
-              )}
+              <TimeChart
+                data={payload.cashflow}
+                emptyLabel="No cashflow data."
+                height={330}
+                series={[
+                  { key: "Inflows", color: "#2df2c9", kind: "bar" },
+                  { key: "Home Costs", color: "#ff63a5", kind: "bar" },
+                  { key: "Mortgage Interest", color: "#7aa7ff", kind: "bar" },
+                  { key: "Mortgage Repayment", color: "#f6d45d", kind: "bar" }
+                ]}
+              />
             </Panel>
             <Panel title="P/L Breakdown">
-              {payload.plBreakdown.length ? (
-                <ResponsiveContainer height={330}>
-                  <LineChart data={payload.plBreakdown}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-                    <Tooltip {...chartTooltip()} />
-                    <Line dataKey="Estimated Equity" stroke="#2df2c9" dot={false} strokeWidth={2.5} />
-                    <Line dataKey="Cumulative Net Cash Flow" stroke="#7aa7ff" dot={false} strokeWidth={2.5} />
-                    <Line dataKey="Total P/L" stroke="#b7ff5a" dot={false} strokeWidth={3} />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No equity/cashflow history." />
-              )}
+              <TimeChart
+                data={payload.profitLoss}
+                emptyLabel="No equity/cashflow history."
+                height={330}
+                series={[
+                  { key: "Estimated Equity", color: "#2df2c9" },
+                  { key: "Cumulative Net Cash Flow", color: "#7aa7ff" },
+                  { key: "Total P/L", color: "#b7ff5a", prominent: true }
+                ]}
+              />
             </Panel>
             <Panel title="Mortgage Balances">
-              {mortgageSeries.data.length ? (
-                <ResponsiveContainer height={330}>
-                  <LineChart data={mortgageSeries.data}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.07)" vertical={false} />
-                    <XAxis dataKey="Date" tick={{ fill: "#7d8b9f", fontSize: 11 }} tickLine={false} axisLine={false} />
-                    <YAxis tick={{ fill: "#7d8b9f", fontSize: 11 }} tickFormatter={formatValue} tickLine={false} axisLine={false} width={86} />
-                    <Tooltip {...chartTooltip()} />
-                    {mortgageSeries.keys.map((key, index) => (
-                      <Line
-                        dataKey={key}
-                        dot={false}
-                        key={key}
-                        stroke={accentColors[index % accentColors.length]}
-                        strokeWidth={key === "TOTAL" ? 3 : 2}
-                      />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyState label="No mortgage balance history." />
-              )}
+              <TimeChart
+                data={mortgageSeries.data}
+                emptyLabel="No mortgage balance history."
+                height={330}
+                series={mortgageSeries.keys.map((key, index) => ({
+                  key,
+                  color: accentColors[index % accentColors.length],
+                  prominent: key === "TOTAL"
+                }))}
+              />
             </Panel>
             <Panel title="Inflow Breakdown">
-              <BreakdownDonut items={payload.inflowBreakdown} emptyLabel="No inflow breakdown." />
+              <BreakdownDonut items={payload.inflows} emptyLabel="No inflow breakdown." />
             </Panel>
             <Panel title="Outflow Breakdown">
-              <BreakdownDonut items={payload.outflowBreakdown} emptyLabel="No outflow breakdown." />
+              <BreakdownDonut items={payload.outflows} emptyLabel="No outflow breakdown." />
             </Panel>
           </div>
           <div className="tableStack">
             <Panel title="Mortgage Summary">
-              <DataTable table={payload.mortgageSummary} emptyLabel="No mortgage summary." />
+              <DataTable table={payload.mortgages} emptyLabel="No mortgage summary." />
             </Panel>
             <Panel title="Recent Outflows">
               <DataTable table={payload.recentOutflows} emptyLabel="No outflows." />
@@ -1119,7 +1055,7 @@ function RealEstateDashboard({
       ) : (
         <EmptyState label="Loading dashboard data." />
       )}
-    </motion.div>
+    </div>
   );
 }
 
@@ -1295,8 +1231,7 @@ export default function App() {
         {error ? <div className="warning">{error}</div> : null}
         {stopMessage ? <div className="warning">{stopMessage}</div> : null}
         {options ? (
-          <AnimatePresence mode="wait">
-            <motion.div key={`${active}-${refreshRevision}`} initial={{ opacity: 0, scale: 0.985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.985 }} transition={{ duration: 0.18 }}>
+          <div key={`${active}-${refreshRevision}`}>
               {active === "stocks" ? (
                 <InvestmentDashboard
                   kind="stocks"
@@ -1337,7 +1272,6 @@ export default function App() {
               ) : null}
               {active === "realEstate" ? (
                 <RealEstateDashboard
-                  options={options}
                   date={date}
                   fromDate={fromDate}
                   period={period}
@@ -1347,8 +1281,7 @@ export default function App() {
                   onStartDateChange={setActiveStartDate}
                 />
               ) : null}
-            </motion.div>
-          </AnimatePresence>
+          </div>
         ) : (
           <EmptyState label="Connecting to backend." />
         )}

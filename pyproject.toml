@@ -17,7 +17,7 @@ dependencies = [
 portfolio-dashboard = "portfolio_dashboard.cli:main"
 
 [dependency-groups]
-dev = ["httpx>=0.28.1", "pytest>=9.0.2", "ruff>=0.14.10"]
+dev = ["httpx2>=0.1.0", "pytest>=9.0.2", "ruff>=0.14.10"]
 
 [build-system]
 requires = ["uv-build>=0.12.3,<0.13"]

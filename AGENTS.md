@@ -23,12 +23,11 @@ root.
 - `portfolio_dashboard.cli`: configures the data root and serves on `127.0.0.1` only.
 - `portfolio_dashboard.main`: explicit `create_app(context=...)` factory, FastAPI routes,
   localhost guards, and static frontend mounting.
-- `portfolio_dashboard.services`: read models and JSON payload construction.
-- `portfolio_dashboard.data_handling`: focused readers/adapters for Arbitrum and real-estate data;
-  market and Nexo projections stay in their owning loader packages.
+- `portfolio_dashboard.services`: dependency read models and compact JSON payload construction.
+- `portfolio_dashboard.arbitrum`: strict reader for the consumed Arbitrum dashboard artifacts.
+- `portfolio_dashboard.real_estate`: one-pass real-estate loading and dashboard calculations.
 - `portfolio_dashboard.refresh_jobs`: one-at-a-time subprocess orchestration for prices,
   transactions, crypto, and combined refreshes.
-- `portfolio_dashboard.real_estate`: real-estate calculations owned by this app.
 - `frontend/`: editable TypeScript/React source.
 - `static/`: generated production assets bundled in the wheel.
 
