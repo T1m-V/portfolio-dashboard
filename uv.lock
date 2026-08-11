@@ -643,19 +643,6 @@ wheels = [
 ]
 
 [[package]]
-name = "html5lib"
-version = "1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "six" },
-    { name = "webencodings" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ac/b6/b55c3f49042f1df3dcd422b7f224f939892ee94f22abcf503a9b7339eaf2/html5lib-1.1.tar.gz", hash = "sha256:b2e5b40261e20f354d198eae92afc10d750afb487ed5e50f9c4eaf07c184146f", size = 272215, upload-time = "2020-06-22T23:32:38.834Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/dd/a834df6482147d48e225a49515aabc28974ad5a4ca3215c18a882565b028/html5lib-1.1-py2.py3-none-any.whl", hash = "sha256:0d78f8fde1c230e99fe37986a60526d7049ed4bf8a9fadbad5f00e22e58e041d", size = 112173, upload-time = "2020-06-22T23:32:36.781Z" },
-]
-
-[[package]]
 name = "httpcore2"
 version = "2.9.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1047,7 +1034,7 @@ wheels = [
 
 [[package]]
 name = "portfolio-core"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "../portfolio-core" }
 dependencies = [
     { name = "pandas" },
@@ -1134,10 +1121,9 @@ dev = [
 
 [[package]]
 name = "portfolio-market-data"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "../portfolio-market-data" }
 dependencies = [
-    { name = "html5lib" },
     { name = "lxml" },
     { name = "mstarpy" },
     { name = "pandas" },
@@ -1148,9 +1134,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "html5lib", specifier = ">=1.1" },
     { name = "lxml", specifier = ">=6.0.2" },
-    { name = "mstarpy", specifier = ">=8.0.3" },
+    { name = "mstarpy", specifier = ">=11.0.1,<12" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "portfolio-core", editable = "../portfolio-core" },
     { name = "requests", specifier = ">=2.32.5" },
@@ -1759,15 +1744,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f1/d9/bdfa9e715804020c3f3676346065c18adbc207c9343a3458246d7430f45c/web3-7.16.0.tar.gz", hash = "sha256:b4a75a3fa94fef4d23d502eb3c2244146ef9a1ee0082cf1cb0a91586ba0510c3", size = 2211469, upload-time = "2026-05-01T21:22:20.666Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/f9/5345c13f8469f3ce344b4d9934c0387b83a49420192482111e9c1fa95ec2/web3-7.16.0-py3-none-any.whl", hash = "sha256:760b2718c473980d70708c3593d9d28395db4b482f45e38a63a36fa028178f51", size = 1372181, upload-time = "2026-05-01T21:22:17.015Z" },
-]
-
-[[package]]
-name = "webencodings"
-version = "0.5.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0b/02/ae6ceac1baeda530866a85075641cec12989bd8d31af6d5ab4a3e8c92f47/webencodings-0.5.1.tar.gz", hash = "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923", size = 9721, upload-time = "2017-04-05T20:21:34.189Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/24/2a3e3df732393fed8b3ebf2ec078f05546de641fe1b667ee316ec1dcf3b7/webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78", size = 11774, upload-time = "2017-04-05T20:21:32.581Z" },
 ]
 
 [[package]]

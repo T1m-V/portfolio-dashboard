@@ -9,7 +9,7 @@ dependencies = [
     "pandas>=2.3.3",
     "portfolio-core @ git+https://github.com/T1m-V/portfolio-core.git@v0.2.0",
     "portfolio-crypto-data @ git+https://github.com/T1m-V/portfolio-crypto-data.git@v0.2.0",
-    "portfolio-market-data @ git+https://github.com/T1m-V/portfolio-market-data.git@v0.2.0",
+    "portfolio-market-data @ git+https://github.com/T1m-V/portfolio-market-data.git@v0.2.1",
     "uvicorn>=0.40.0",
 ]
 
