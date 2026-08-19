@@ -49,6 +49,6 @@ jobs:
       - name: Install wheel without sibling checkouts
         run: |
           uv venv .ci-venv --python 3.14
-          uv pip install --python .ci-venv/bin/python dist/*.whl
+          uv pip install --no-sources --python .ci-venv/bin/python dist/*.whl
           .ci-venv/bin/portfolio-dashboard --help
           .ci-venv/bin/python -c "from importlib.resources import files; from portfolio_dashboard.main import create_app; from portfolio_core import PortfolioContext; assert files('portfolio_dashboard').joinpath('static/index.html').is_file(); create_app(context=PortfolioContext.from_root('.'))"
