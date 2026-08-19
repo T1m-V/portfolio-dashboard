@@ -10,7 +10,7 @@ Install the released dashboard and configure a data workspace. The uv tool envir
 the tagged core and loader packages, never local source paths:
 
 ```powershell
-uv tool install "portfolio-dashboard @ git+https://github.com/T1m-V/portfolio-dashboard.git@v0.3.0"
+uv tool install --no-sources "portfolio-dashboard @ git+https://github.com/T1m-V/portfolio-dashboard.git@v0.3.0"
 portfolio-dashboard configure --data-dir "C:\path\to\portfolio-data"
 portfolio-dashboard serve
 ```
