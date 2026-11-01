@@ -86,12 +86,15 @@ class RefreshJobManager:
         market = [*prefix, "portfolio_market_data.cli", "--data-dir", str(data_dir)]
         crypto = [*prefix, "portfolio_crypto_data.cli", "--data-dir", str(data_dir)]
         steps = {
-            "prices": [("Market prices", [*market, "prices", "update"])],
+            "prices": [
+                ("Market prices", [*market, "prices", "update"]),
+                ("Arbitrum valuations", [*crypto, "rebuild"]),
+            ],
             "transactions": [("Getquin transactions", [*market, "transactions", "update"])],
             "crypto": [("Crypto data", [*crypto, "update"])],
         }
         if kind == "all":
-            return [*steps["prices"], *steps["transactions"], *steps["crypto"]]
+            return [steps["prices"][0], *steps["transactions"], *steps["crypto"]]
         return steps[kind]
 
     def _execute(self, *, command: list[str], data_dir: Path) -> subprocess.CompletedProcess[str]:

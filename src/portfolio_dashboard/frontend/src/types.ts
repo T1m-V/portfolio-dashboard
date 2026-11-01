@@ -54,9 +54,17 @@ export type RealEstatePayload = {
 export type ArbitrumPayload = {
   title: string;
   startDate: string;
+  dataThrough: string | null;
+  lifecycle: {
+    status: "active" | "closed" | "empty";
+    openedOn: string | null;
+    closedOn: string | null;
+    accountingSettledOn: string | null;
+  };
   metrics: Metric[];
   transactionHistory: Record<string, string | number | null>[];
   history: Record<string, string | number | null>[];
+  positionHistory: Record<string, string | number | null>[];
   composition: CompositionPayload;
   sources: TablePayload;
   transactions: TablePayload;

@@ -45,6 +45,19 @@ def test_refreshes_keep_the_loader_cli_boundary_and_run_one_at_a_time(
     ]
 
 
+def test_price_refresh_rebuilds_arbitrum_valuations(tmp_path: Path) -> None:
+    manager = RefreshJobManager()
+
+    actual = [
+        (label, command[2], command[-1])
+        for label, command in manager._steps("prices", tmp_path)
+    ]
+    assert actual == [
+        ("Market prices", "portfolio_market_data.cli", "update"),
+        ("Arbitrum valuations", "portfolio_crypto_data.cli", "rebuild"),
+    ]
+
+
 def test_refresh_failure_is_reported(tmp_path: Path, monkeypatch) -> None:
     manager = RefreshJobManager()
     monkeypatch.setattr(

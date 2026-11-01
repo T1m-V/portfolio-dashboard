@@ -246,9 +246,126 @@ def test_arbitrum_payload_filters_asset_period_sources_and_transactions(monkeypa
             "Quantity": 0.01,
         }
     ]
-    assert payload["metrics"][0]["value"] == 50
+    assert {metric["label"]: metric["value"] for metric in payload["metrics"]} == {
+        "Current Value": 50.0,
+        "Net P/L": 5.0,
+        "Net Invested": 5.0,
+        "Transactions": 1,
+    }
+    assert payload["positionHistory"] == payload["history"]
+    assert payload["dataThrough"] == "2025-02-01"
+    assert payload["lifecycle"] == {
+        "status": "active",
+        "openedOn": "2025-01-01",
+        "closedOn": None,
+        "accountingSettledOn": None,
+    }
     assert payload["sources"]["rows"][0]["Source"] == "Aave"
     assert payload["transactions"]["rows"][0]["TX Hash"] == "hash"
+
+
+def test_arbitrum_payload_trims_closed_position_and_accounting_tails(monkeypatch) -> None:
+    timeseries = pd.DataFrame(
+        [
+            ["2025-01-01", "BTC", 100, 80, 20, 1, 1],
+            ["2025-01-02", "BTC", 0, -20, 20, 0, 1],
+            ["2025-01-03", "BTC", 0, -20, 20, 0, 0],
+            ["2025-02-01", "BTC", 0, -25, 25, 0, 1],
+            ["2025-02-02", "BTC", 0, -25, 25, 0, 0],
+            ["2025-03-01", "BTC", 0, -25, 25, 0, 0],
+        ],
+        columns=[
+            "Date",
+            "Selection",
+            "MarketValueEUR",
+            "PrincipalInvestedEUR",
+            "ProfitLossEUR",
+            "Quantity",
+            "TxCount",
+        ],
+    )
+    transactions = pd.DataFrame(
+        [["2025-02-01", "Adjustment", "", 0, "", 0, 0, "", "hash", "BTC"]],
+        columns=[
+            "Date",
+            "Type",
+            "Token in",
+            "Qty in",
+            "Token out",
+            "Qty out",
+            "Fee",
+            "Fee Token",
+            "TX Hash",
+            "AssetKeys",
+        ],
+    )
+    for frame in (timeseries, transactions):
+        frame["Date"] = pd.to_datetime(frame["Date"])
+    empty_composition = pd.DataFrame(
+        columns=["Date", "Selection", "CompositionMode", "Label", "ValueEUR"]
+    )
+    empty_sources = pd.DataFrame(
+        columns=[
+            "Date",
+            "Selection",
+            "Source",
+            "Coin",
+            "Quantity",
+            "MarketValueEUR",
+            "PrincipalInvestedEUR",
+            "ProfitLossEUR",
+            "ValuationRoute",
+        ]
+    )
+    artifacts = ArbitrumArtifacts(
+        timeseries=timeseries,
+        composition=empty_composition,
+        sources=empty_sources,
+        transactions=transactions,
+        warnings=[],
+    )
+    monkeypatch.setattr(services, "load_arbitrum_artifacts", lambda _chain: artifacts)
+
+    payload = services.build_arbitrum_payload(
+        selected_date="2025-03-01",
+        from_date="2025-01-01",
+        asset="BTC",
+        composition="name",
+        currency_unit="EUR",
+    )
+
+    assert [row["Date"] for row in payload["positionHistory"]] == [
+        "2025-01-01",
+        "2025-01-02",
+    ]
+    assert [row["Date"] for row in payload["history"]] == [
+        "2025-01-01",
+        "2025-01-02",
+        "2025-01-03",
+        "2025-02-01",
+    ]
+    assert payload["lifecycle"] == {
+        "status": "closed",
+        "openedOn": "2025-01-01",
+        "closedOn": "2025-01-02",
+        "accountingSettledOn": "2025-02-01",
+    }
+
+    after_close = services.build_arbitrum_payload(
+        selected_date="2025-03-01",
+        from_date="2025-03-01",
+        asset="BTC",
+        composition="name",
+        currency_unit="EUR",
+    )
+    assert after_close["history"] == []
+    assert after_close["positionHistory"] == []
+    assert {metric["label"]: metric["value"] for metric in after_close["metrics"]} == {
+        "Current Value": 0.0,
+        "Net P/L": 0.0,
+        "Net Invested": 0.0,
+        "Transactions": 0,
+    }
 
 
 def test_missing_investment_data_is_an_empty_state(monkeypatch) -> None:

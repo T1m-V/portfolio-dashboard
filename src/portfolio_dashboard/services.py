@@ -40,6 +40,8 @@ from portfolio_dashboard.real_estate import (
 ALL = "ALL"
 PAGE_SIZE = 5
 ARBITRUM_CHAIN = "arbitrum"
+ARBITRUM_QUANTITY_EPSILON = 1e-10
+ARBITRUM_VALUE_EPSILON = 0.01
 
 
 def _json_value(value: Any) -> Any:
@@ -389,6 +391,94 @@ def _arbitrum_composition(
     return {"kind": "breakdown", "items": records(items)}
 
 
+def _arbitrum_lifecycle(history: pd.DataFrame, asset: str) -> dict[str, str | None]:
+    lifecycle: dict[str, str | None] = {
+        "status": "active",
+        "openedOn": None,
+        "closedOn": None,
+        "accountingSettledOn": None,
+    }
+    if asset == ALL or history.empty:
+        return lifecycle
+
+    frame = history.sort_values("Date").reset_index(drop=True)
+    material = (frame["Quantity"].abs() > ARBITRUM_QUANTITY_EPSILON) | (
+        frame["MarketValueEUR"].abs() >= ARBITRUM_VALUE_EPSILON
+    )
+    if not material.any():
+        lifecycle["status"] = "empty"
+        return lifecycle
+
+    lifecycle["openedOn"] = frame.loc[material, "Date"].iloc[0].strftime("%Y-%m-%d")
+    if material.iloc[-1]:
+        return lifecycle
+
+    lifecycle["status"] = "closed"
+    last_active_index = int(material[material].index[-1])
+    closed_index = min(last_active_index + 1, len(frame) - 1)
+    lifecycle["closedOn"] = frame.loc[closed_index, "Date"].strftime("%Y-%m-%d")
+
+    final = frame.iloc[-1]
+    same_as_final = pd.Series(True, index=frame.index)
+    for column in ("MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR", "Quantity"):
+        tolerance = (
+            ARBITRUM_QUANTITY_EPSILON
+            if column == "Quantity"
+            else 1e-9 * max(1.0, abs(float(final[column])))
+        )
+        same_as_final &= (frame[column] - float(final[column])).abs() <= tolerance
+    differing = frame.index[~same_as_final]
+    settled_index = int(differing.max() + 1) if len(differing) else 0
+    lifecycle["accountingSettledOn"] = frame.loc[settled_index, "Date"].strftime("%Y-%m-%d")
+    return lifecycle
+
+
+def _trim_arbitrum_history(history: pd.DataFrame, through: str | None) -> pd.DataFrame:
+    if history.empty or not through:
+        return history.copy()
+    return history[history["Date"] <= pd.Timestamp(through)].copy()
+
+
+def _arbitrum_period_metrics(
+    history: pd.DataFrame,
+    transactions: pd.DataFrame,
+    from_date: str,
+    selected_date: str,
+    currency_unit: str,
+) -> list[dict[str, Any]]:
+    current_frame = latest_as_of(history, selected_date)
+    current = current_frame.iloc[-1] if not current_frame.empty else {}
+    baseline = history[history["Date"] < pd.Timestamp(from_date)].tail(1)
+    previous = baseline.iloc[-1] if not baseline.empty else {}
+    current_value = float(current.get("Market Value", 0))
+    opening_value = float(previous.get("Market Value", 0))
+    net_invested = float(current.get("Invested Capital", 0)) - float(
+        previous.get("Invested Capital", 0)
+    )
+    profit_loss = current_value - opening_value - net_invested
+    period_transactions = transactions[
+        pd.to_datetime(transactions["Date"], errors="coerce")
+        .dt.normalize()
+        .between(pd.Timestamp(from_date), pd.Timestamp(selected_date))
+    ]
+    metric_values = (
+        ("Current Value", current_value),
+        ("Net P/L", profit_loss),
+        ("Net Invested", net_invested),
+        ("Transactions", len(period_transactions)),
+    )
+    return [
+        {
+            "label": label,
+            "value": value,
+            "display": (
+                f"{value:,}" if label == "Transactions" else currency(value, currency_unit)
+            ),
+        }
+        for label, value in metric_values
+    ]
+
+
 def build_arbitrum_payload(
     *,
     selected_date: str,
@@ -398,7 +488,14 @@ def build_arbitrum_payload(
     currency_unit: str,
 ) -> dict[str, Any]:
     artifacts = load_arbitrum_artifacts(ARBITRUM_CHAIN)
-    history = through_date(select(artifacts.timeseries, asset), selected_date)
+    raw_history = through_date(
+        select(artifacts.timeseries, asset), selected_date
+    ).sort_values("Date")
+    lifecycle = _arbitrum_lifecycle(raw_history, asset)
+    data_through = (
+        raw_history["Date"].max().strftime("%Y-%m-%d") if not raw_history.empty else None
+    )
+    history = raw_history.copy()
     history = _convert_from_eur(
         history,
         ["MarketValueEUR", "PrincipalInvestedEUR", "ProfitLossEUR"],
@@ -412,26 +509,25 @@ def build_arbitrum_payload(
         }
     )
     history = history[["Date", "Market Value", "Invested Capital", "Profit/Loss", "Quantity"]]
-    period_history = _period(history, from_date, selected_date)
-    latest = latest_as_of(history, selected_date)
-    current = latest.iloc[-1] if not latest.empty else {}
     transactions = _arbitrum_transactions(artifacts, asset, selected_date, None)
-    metric_values = (
-        ("Current Value", float(current.get("Market Value", 0))),
-        ("Net P/L", float(current.get("Profit/Loss", 0))),
-        ("Net Invested", float(current.get("Invested Capital", 0))),
-        ("Transactions", len(transactions)),
+    metrics = _arbitrum_period_metrics(
+        history,
+        transactions,
+        from_date,
+        selected_date,
+        currency_unit,
     )
-    metrics = [
-        {
-            "label": label,
-            "value": value,
-            "display": f"{value:,}" if label == "Transactions" else currency(value, currency_unit),
-        }
-        for label, value in metric_values
-    ]
+    accounting_history = history
+    position_history = history
+    if lifecycle["status"] == "closed":
+        accounting_history = _trim_arbitrum_history(
+            history, lifecycle["accountingSettledOn"]
+        )
+        position_history = _trim_arbitrum_history(history, lifecycle["closedOn"])
+    period_history = _period(accounting_history, from_date, selected_date)
+    period_position_history = _period(position_history, from_date, selected_date)
     transaction_history = _period(
-        through_date(select(artifacts.timeseries, asset), selected_date), from_date, selected_date
+        raw_history, from_date, selected_date
     )[["Date", "TxCount"]].rename(columns={"TxCount": "Tx Count"})
 
     sources = select(artifacts.sources, asset) if asset != ALL else artifacts.sources.iloc[:0]
@@ -459,10 +555,15 @@ def build_arbitrum_payload(
     return {
         "title": "Arbitrum" if asset == ALL else f"Arbitrum: {asset}",
         "startDate": (
-            history["Date"].min().strftime("%Y-%m-%d") if not history.empty else selected_date
+            raw_history["Date"].min().strftime("%Y-%m-%d")
+            if not raw_history.empty
+            else selected_date
         ),
+        "dataThrough": data_through,
+        "lifecycle": lifecycle,
         "metrics": metrics,
         "history": records(period_history),
+        "positionHistory": records(period_position_history),
         "transactionHistory": records(transaction_history),
         "composition": _arbitrum_composition(
             artifacts, asset, selected_date, composition, currency_unit

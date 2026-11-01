@@ -959,14 +959,24 @@ function ArbitrumDashboard({
     if (payload?.startDate) {
       onStartDateChange(payload.startDate);
     }
-  }, [payload?.startDate, onStartDateChange]);
+  }, [asset, payload?.startDate, onStartDateChange]);
 
   const openingValue = payload?.history.find((row) => typeof row["Market Value"] === "number")?.["Market Value"];
   const openingCurrency = payload?.metrics[0]?.display.match(/^[A-Z]{3}\s/)?.[0] ?? `${currency} `;
   const metrics = payload && typeof openingValue === "number"
     ? [payload.metrics[0], { label: "Opening Value", value: openingValue, display: openingCurrency }, ...payload.metrics.slice(1)]
     : (payload?.metrics ?? []);
-  const through = payload ? latestDate(payload.history) : null;
+  const through = payload?.dataThrough ?? null;
+  const closedPosition = payload?.lifecycle.status === "closed";
+  const closedDate = payload?.lifecycle.closedOn
+    ? displayDate(payload.lifecycle.closedOn)
+    : null;
+  const settledDate = payload?.lifecycle.accountingSettledOn
+    ? displayDate(payload.lifecycle.accountingSettledOn)
+    : null;
+  const closedPeriodLabel = closedDate
+    ? `No activity in this period. Position closed ${closedDate}.`
+    : "No activity in this period.";
 
   return (
     <div className="workspace">
@@ -991,6 +1001,16 @@ function ArbitrumDashboard({
 
       <PeriodContext fromDate={fromDate} date={date} />
 
+      {closedPosition ? (
+        <div className="positionNotice">
+          <strong>Position closed {closedDate}</strong>
+          <span>
+            Realized P/L is retained
+            {settledDate && settledDate !== closedDate ? ` through ${settledDate}` : ""}; inactive chart tails are hidden.
+          </span>
+        </div>
+      ) : null}
+
       {error ? <div className="warning">{error}</div> : null}
       {(payload?.warnings ?? []).map((warning) => (
         <div className="warning" key={warning}>{warning}</div>
@@ -1003,7 +1023,7 @@ function ArbitrumDashboard({
             <Panel title="Portfolio Value" icon={<Activity size={18} />}>
               <TimeChart
                 data={payload.history}
-                emptyLabel="No value history."
+                emptyLabel={closedPosition ? closedPeriodLabel : "No value history."}
                 series={[
                   { key: "Market Value", color: "#2df2c9", kind: "area" },
                   { key: "Invested Capital", color: "#b7ff5a", dashed: true }
@@ -1024,7 +1044,7 @@ function ArbitrumDashboard({
             <Panel title="Profit/Loss" icon={<Gauge size={18} />}>
               <TimeChart
                 data={payload.history}
-                emptyLabel="No profit/loss history."
+                emptyLabel={closedPosition ? closedPeriodLabel : "No profit/loss history."}
                 height={260}
                 series={[{ key: "Profit/Loss", color: "#b7ff5a", kind: "area" }]}
               />
@@ -1032,8 +1052,10 @@ function ArbitrumDashboard({
 
             <Panel title={asset !== ALL ? "Quantity" : "Transaction Activity"} icon={<RefreshCcw size={18} />}>
               <TimeChart
-                data={asset !== ALL ? payload.history : payload.transactionHistory}
-                emptyLabel={asset !== ALL ? "No quantity history." : "No transaction activity."}
+                data={asset !== ALL ? payload.positionHistory : payload.transactionHistory}
+                emptyLabel={asset !== ALL
+                  ? (closedPosition ? closedPeriodLabel : "No quantity history.")
+                  : "No transaction activity."}
                 height={260}
                 series={[
                   {
@@ -1190,7 +1212,7 @@ function InvestmentDashboard({
     if (payload?.startDate) {
       onStartDateChange(payload.startDate);
     }
-  }, [payload?.startDate, onStartDateChange]);
+  }, [dimension, payload?.startDate, selection, onStartDateChange]);
 
   const metrics = payload ? investmentMetrics(payload.metrics, kind, payload.history) : [];
   const through = payload ? latestDate(payload.history) : null;
@@ -1447,7 +1469,7 @@ function RealEstateDashboard({
 }
 
 const refreshOptions: { kind: RefreshKind; label: string }[] = [
-  { kind: "prices", label: "Update market prices" },
+  { kind: "prices", label: "Update market prices + valuations" },
   { kind: "transactions", label: "Import Getquin activity" },
   { kind: "crypto", label: "Update crypto data" },
   { kind: "all", label: "Update all data" }
