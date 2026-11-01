@@ -1084,7 +1084,7 @@ dev = [
 
 [[package]]
 name = "portfolio-dashboard"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -1121,7 +1121,7 @@ dev = [
 
 [[package]]
 name = "portfolio-market-data"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "../portfolio-market-data" }
 dependencies = [
     { name = "lxml" },

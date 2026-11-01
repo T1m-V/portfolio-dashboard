@@ -1,6 +1,6 @@
 [project]
 name = "portfolio-dashboard"
-version = "0.3.2"
+version = "0.3.3"
 description = "Local portfolio dashboard with bundled React frontend"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
@@ -9,7 +9,7 @@ dependencies = [
     "pandas>=2.3.3",
     "portfolio-core @ git+https://github.com/T1m-V/portfolio-core.git@v0.3.0",
     "portfolio-crypto-data @ git+https://github.com/T1m-V/portfolio-crypto-data.git@v0.3.0",
-    "portfolio-market-data @ git+https://github.com/T1m-V/portfolio-market-data.git@v0.3.0",
+    "portfolio-market-data @ git+https://github.com/T1m-V/portfolio-market-data.git@v0.3.1",
     "uvicorn>=0.40.0",
 ]
 
