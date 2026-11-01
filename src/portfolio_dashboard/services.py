@@ -93,7 +93,10 @@ def build_options_payload() -> dict[str, list[dict[str, str]]]:
             "provider": info["provider"],
         }
         for isin, info in context.stock_metadata().items()
-        if get_stock_start_date(context=context, isins=[isin]) is not None
+        if (
+            get_stock_start_date(context=context, isins=[isin]) is not None
+            and _has_price_file(context, isin)
+        )
     ]
     metadata = context.currency_metadata()
     nexo = [
@@ -112,12 +115,25 @@ def build_options_payload() -> dict[str, list[dict[str, str]]]:
     return {"stocks": stocks, "nexo": nexo, "arbitrum": arbitrum}
 
 
+def _has_price_file(context: Any, isin: str) -> bool:
+    paths = getattr(context, "paths", None)
+    if paths is None:
+        return True
+    try:
+        return paths.direct_price(isin).exists()
+    except Exception:
+        return True
+
+
 def _stock_isins(dimension: str, selection: str) -> list[str]:
     context = active_context()
     metadata = {
         isin: info
         for isin, info in context.stock_metadata().items()
-        if get_stock_start_date(context=context, isins=[isin]) is not None
+        if (
+            get_stock_start_date(context=context, isins=[isin]) is not None
+            and _has_price_file(context, isin)
+        )
     }
     if selection == ALL:
         return list(metadata)
