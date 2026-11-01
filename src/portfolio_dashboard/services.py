@@ -113,7 +113,12 @@ def build_options_payload() -> dict[str, list[dict[str, str]]]:
 
 
 def _stock_isins(dimension: str, selection: str) -> list[str]:
-    metadata = active_context().stock_metadata()
+    context = active_context()
+    metadata = {
+        isin: info
+        for isin, info in context.stock_metadata().items()
+        if get_stock_start_date(context=context, isins=[isin]) is not None
+    }
     if selection == ALL:
         return list(metadata)
     if dimension == "name":

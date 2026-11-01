@@ -1,6 +1,6 @@
 [project]
 name = "portfolio-dashboard"
-version = "0.3.1"
+version = "0.3.2"
 description = "Local portfolio dashboard with bundled React frontend"
 readme = "README.md"
 requires-python = ">=3.14,<3.15"
